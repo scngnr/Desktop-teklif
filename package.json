@@ -1,0 +1,54 @@
+{
+  "name": "desktop-teklif",
+  "version": "1.0.0",
+  "description": "MRP teklif klasoru olusturma uygulamasi",
+  "main": "main.js",
+  "author": "Epron",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --win portable"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "tr.epron.desktop-teklif",
+    "productName": "Desktop Teklif",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "index.html",
+      "renderer.js",
+      "styles.css",
+      "src/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "örnek klasör",
+        "to": "örnek klasör"
+      }
+    ],
+    "win": {
+      "signAndEditExecutable": false,
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "Desktop-Teklif--portable.exe"
+    },
+    "portable": {
+      "artifactName": "Desktop-Teklif--portable.exe"
+    }
+  }
+}

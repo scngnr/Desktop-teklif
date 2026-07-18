@@ -1,0 +1,19 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('teklifApp', {
+  minimize: () => ipcRenderer.invoke('window:minimize'),
+  close: () => ipcRenderer.invoke('window:close'),
+  getConfig: () => ipcRenderer.invoke('config:get'),
+  saveConfig: (partial) => ipcRenderer.invoke('config:save', partial),
+  getUserInfo: () => ipcRenderer.invoke('user:info'),
+  resolveSample: () => ipcRenderer.invoke('sample:resolve'),
+  createTeklif: () => ipcRenderer.invoke('teklif:create'),
+  openPath: (p) => ipcRenderer.invoke('shell:openPath', p),
+  isWebLoggedIn: () => ipcRenderer.invoke('session:isLoggedIn'),
+  getCompanyName: () => ipcRenderer.invoke('company:name'),
+  onSessionChanged: (handler) => {
+    const listener = (_event, payload) => handler(payload);
+    ipcRenderer.on('session:changed', listener);
+    return () => ipcRenderer.removeListener('session:changed', listener);
+  },
+});
