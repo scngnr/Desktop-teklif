@@ -40,10 +40,11 @@
 
         <nav class="nav" aria-label="Ana menü" id="mainNav">
           <p class="nav-section-label">Uygulama</p>
-          <button type="button" class="nav-action-btn" id="btnCreateTeklif" title="Yeni Teklif Oluştur">
+          <button type="button" class="nav-action-btn" id="btnCreateTeklif" title="Yeni Teklif Oluştur" disabled>
             <span class="nav-icon" aria-hidden="true">◇</span>
             <span class="nav-label">Yeni Teklif</span>
           </button>
+          <p class="license-status" id="licenseStatus">Lisans kontrol ediliyor…</p>
           <button type="button" class="nav-item" data-view="ayarlar" title="Ayarlar">
             <span class="nav-icon" aria-hidden="true">⚙</span>
             <span class="nav-label">Ayarlar</span>
@@ -108,7 +109,7 @@
     </div>
   </div>
 
-  <button type="button" class="fab-teklif" id="btnCreateTeklifFab" title="Yeni Teklif Oluştur" hidden>
+  <button type="button" class="fab-teklif" id="btnCreateTeklifFab" title="Yeni Teklif Oluştur" hidden disabled>
     <span class="fab-icon" aria-hidden="true">◇</span>
     <span class="fab-label">Yeni Teklif</span>
   </button>

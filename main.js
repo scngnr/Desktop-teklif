@@ -12,8 +12,10 @@ const {
 } = require('./src/mrpApi');
 const { createTeklifFolder, resolveSampleFolder } = require('./src/folderService');
 const history = require('./src/history');
+const { checkAndEnsureLicense } = require('./src/licenseService');
 
 const WEBVIEW_PARTITION = 'persist:mrp';
+let lastLicenseStatus = null;
 const SESSION_COOKIE_RE =
   /^(sp_session|ci_session|PHPSESSID|laravel_session|remember|session)/i;
 
@@ -156,6 +158,26 @@ ipcMain.handle('customers:list', async () => {
   }
 });
 
+ipcMain.handle('license:check', async () => {
+  try {
+    const owner = decodeTokenOwner();
+    const status = await checkAndEnsureLicense({
+      userAdi: owner && owner.name ? owner.name : undefined,
+      firmaAdi: config.getPublic().firmaAdi || undefined,
+    });
+    lastLicenseStatus = status;
+    return status;
+  } catch (err) {
+    lastLicenseStatus = {
+      ok: false,
+      licensed: false,
+      error: err.message || String(err),
+      apiReachable: false,
+    };
+    return lastLicenseStatus;
+  }
+});
+
 ipcMain.handle('teklif:create', async (_event, payload = {}) => {
   try {
     if (!config.hasAuthToken()) {
@@ -163,6 +185,21 @@ ipcMain.handle('teklif:create', async (_event, payload = {}) => {
         ok: false,
         error: 'JWT token yok. Ayarlar’dan token girin.',
         needSettings: true,
+      };
+    }
+
+    let license = lastLicenseStatus;
+    if (!license || !license.licensed) {
+      license = await checkAndEnsureLicense();
+      lastLicenseStatus = license;
+    }
+    if (!license.licensed) {
+      return {
+        ok: false,
+        error:
+          'Lisans aktif değil. Bu cihaz için teklif sunucu lisansı gerekli.',
+        needLicense: true,
+        license,
       };
     }
 

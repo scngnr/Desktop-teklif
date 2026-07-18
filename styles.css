@@ -364,6 +364,30 @@ button, input {
   opacity: 1;
 }
 
+.license-status {
+  margin: 2px 4px 8px;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  color: var(--muted);
+  word-break: break-word;
+}
+
+.license-status.ok {
+  color: var(--ok);
+}
+
+.license-status.err {
+  color: var(--err);
+}
+
+.license-status.warn {
+  color: var(--warn);
+}
+
+.layout.sidebar-collapsed .license-status {
+  display: none;
+}
+
 .nav-icon {
   width: 1.1em;
   text-align: center;

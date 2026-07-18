@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('teklifApp', {
   isWebLoggedIn: () => ipcRenderer.invoke('session:isLoggedIn'),
   getCompanyName: () => ipcRenderer.invoke('company:name'),
   listHistory: () => ipcRenderer.invoke('history:list'),
+  checkLicense: () => ipcRenderer.invoke('license:check'),
   onSessionChanged: (handler) => {
     const listener = (_event, payload) => handler(payload);
     ipcRenderer.on('session:changed', listener);

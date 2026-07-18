@@ -31,6 +31,7 @@ npm run dist       # Windows portable exe → dist/
 ## Notlar
 
 - JWT yalnızca `%AppData%` altındaki `settings.json` içinde saklanır; repoda sabit token yoktur.
+- **Yeni Teklif** butonu yalnızca JWT + [teklif sunucu](https://nextjs-teklif-sunucu.vercel.app/api-referans/) lisansı (`GET /api/license/{mac}/`, `license: true`) ile açılır. Kayıt yoksa MAC ile `POST /api/license/` başvurusu yapılır.
 - Örnek klasör: önce `Desktop\örnek klasör`, yoksa paket içi kopya.
 - Giriş yapılmış web oturumunda sidebar gizlenir; **Yeni Teklif** sağ alt FAB olur.
 - Titlebar firma adı, `/admin/api/api_guide` login sayfasından okunur.

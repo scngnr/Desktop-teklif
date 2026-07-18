@@ -27,6 +27,7 @@ const selectCustomer = document.getElementById('selectCustomer');
 const selectContact = document.getElementById('selectContact');
 const folderNamePreview = document.getElementById('folderNamePreview');
 const inputProjectName = document.getElementById('inputProjectName');
+const licenseStatusEl = document.getElementById('licenseStatus');
 
 const SIDEBAR_KEY = 'desktop-teklif-sidebar-collapsed';
 const CREATE_LABEL = 'Yeni Teklif';
@@ -42,6 +43,8 @@ let webLoggedIn = false;
 let creatingTeklif = false;
 let companiesCache = [];
 let customersLoading = false;
+let licenseOk = false;
+let lastLicense = null;
 
 function showToast(message, kind = 'info', durationMs = 4200, action = null) {
   const text = String(message || '').trim();
@@ -146,15 +149,77 @@ function updateSidebarToggleUi() {
   btnSidebarToggle.title = collapsed ? 'Menüyü genişlet' : 'Menüyü daralt';
 }
 
+function canCreateTeklif() {
+  return !!(licenseOk && cachedHasAuth && !creatingTeklif);
+}
+
+function syncCreateButtonsEnabled() {
+  const enabled = canCreateTeklif();
+  btnCreateTeklif.disabled = !enabled;
+  btnCreateTeklifFab.disabled = !enabled;
+  const title = !cachedHasAuth
+    ? 'Önce Ayarlar’dan JWT girin'
+    : !licenseOk
+      ? 'Lisans aktif değil'
+      : 'Yeni Teklif Oluştur';
+  btnCreateTeklif.title = title;
+  btnCreateTeklifFab.title = title;
+}
+
 function setCreateBusy(busy) {
   creatingTeklif = busy;
-  btnCreateTeklif.disabled = busy;
-  btnCreateTeklifFab.disabled = busy;
   const label = busy ? CREATE_BUSY_LABEL : CREATE_LABEL;
   const navLabel = btnCreateTeklif.querySelector('.nav-label');
   const fabLabel = btnCreateTeklifFab.querySelector('.fab-label');
   if (navLabel) navLabel.textContent = label;
   if (fabLabel) fabLabel.textContent = label;
+  syncCreateButtonsEnabled();
+}
+
+function setLicenseStatusUi(status) {
+  lastLicense = status || null;
+  licenseOk = !!(status && status.licensed);
+  licenseStatusEl.classList.remove('ok', 'err', 'warn');
+
+  if (!status) {
+    licenseStatusEl.textContent = 'Lisans durumu bilinmiyor';
+    licenseStatusEl.classList.add('warn');
+  } else if (status.error && !status.apiReachable) {
+    licenseStatusEl.textContent = 'Lisans sunucusuna ulaşılamadı';
+    licenseStatusEl.classList.add('err');
+  } else if (status.licensed) {
+    const firma = status.firmaAdi ? ` · ${status.firmaAdi}` : '';
+    licenseStatusEl.textContent = `Lisans aktif${firma}`;
+    if (status.mac) {
+      licenseStatusEl.title = `MAC: ${status.mac}`;
+    }
+    licenseStatusEl.classList.add('ok');
+  } else if (status.registered) {
+    licenseStatusEl.textContent = 'Başvuru yapıldı — lisans onayı bekleniyor';
+    licenseStatusEl.classList.add('warn');
+  } else {
+    licenseStatusEl.textContent = 'Lisans pasif / yok';
+    licenseStatusEl.classList.add('err');
+  }
+
+  syncCreateButtonsEnabled();
+}
+
+async function refreshLicense() {
+  licenseStatusEl.textContent = 'Lisans kontrol ediliyor…';
+  licenseStatusEl.classList.remove('ok', 'err', 'warn');
+  try {
+    const status = await window.teklifApp.checkLicense();
+    setLicenseStatusUi(status);
+    return status;
+  } catch (err) {
+    setLicenseStatusUi({
+      licensed: false,
+      apiReachable: false,
+      error: err.message || String(err),
+    });
+    return null;
+  }
 }
 
 function syncFabVisibility() {
@@ -210,6 +275,7 @@ async function refreshConfigCache() {
   cachedHasAuth = !!cfg.hasAuthToken;
   cachedAdminRoot =
     cfg.adminRoot || buildAdminRoot(cachedBaseUrl, cachedFirmaAdi);
+  syncCreateButtonsEnabled();
   return cfg;
 }
 
@@ -554,6 +620,18 @@ async function createTeklifAction(payload = {}) {
     return;
   }
 
+  if (!licenseOk) {
+    await refreshLicense();
+  }
+  if (!licenseOk) {
+    showToast(
+      'Lisans aktif değil. Teklif butonu yalnızca lisanslı cihazda açılır.',
+      'err',
+      6500
+    );
+    return;
+  }
+
   setCreateBusy(true);
   showToast('API kaydı ve klasör oluşturuluyor…', 'info', 6000);
 
@@ -594,7 +672,15 @@ async function createTeklifAction(payload = {}) {
 function requestCreateTeklif() {
   if (creatingTeklif) return;
   if (!cachedHasAuth) {
-    createTeklifAction();
+    showToast('Önce Ayarlar’dan JWT token girin.', 'err');
+    showView('ayarlar', {
+      navBtn: document.querySelector('.nav-item[data-view="ayarlar"]'),
+    });
+    return;
+  }
+  if (!licenseOk) {
+    showToast('Lisans aktif değil.', 'err');
+    refreshLicense();
     return;
   }
   openConfirmModal();
@@ -685,6 +771,7 @@ settingsForm.addEventListener('submit', async (e) => {
   showToast('Ayarlar kaydedildi.', 'ok');
   await loadUserInfo();
   await loadCompanyBrand();
+  await refreshLicense();
 });
 
 pageWebview.addEventListener('did-navigate', () => {
@@ -717,7 +804,12 @@ window.teklifApp.onSessionChanged((payload) => {
 
 restoreSidebarState();
 refreshConfigCache().then(async () => {
-  await Promise.all([loadUserInfo(), loadCompanyBrand(), loadHistory()]);
+  await Promise.all([
+    loadUserInfo(),
+    loadCompanyBrand(),
+    loadHistory(),
+    refreshLicense(),
+  ]);
 
   if (!cachedHasAuth) {
     await showView('ayarlar', {
