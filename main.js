@@ -3,6 +3,7 @@ const path = require('path');
 const config = require('./src/config');
 const {
   fetchLastNumber,
+  fetchCompaniesContacts,
   createTeklifRecord,
   formatTeklifNumber,
   getConfigPublic,
@@ -10,6 +11,7 @@ const {
   fetchCompanyName,
 } = require('./src/mrpApi');
 const { createTeklifFolder, resolveSampleFolder } = require('./src/folderService');
+const history = require('./src/history');
 
 const WEBVIEW_PARTITION = 'persist:mrp';
 const SESSION_COOKIE_RE =
@@ -46,6 +48,7 @@ async function isWebLoggedIn() {
 }
 
 function createWindow() {
+  const iconPath = path.join(__dirname, 'build', 'icon.png');
   mainWindow = new BrowserWindow({
     width: 1180,
     height: 760,
@@ -55,6 +58,7 @@ function createWindow() {
     titleBarStyle: 'hidden',
     backgroundColor: '#0f1419',
     show: false,
+    icon: iconPath,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -135,24 +139,69 @@ ipcMain.handle('sample:resolve', () => {
   }
 });
 
-ipcMain.handle('teklif:create', async () => {
+ipcMain.handle('customers:list', async () => {
   try {
+    if (!config.hasAuthToken()) {
+      return {
+        ok: false,
+        companies: [],
+        error: 'JWT token yok. Ayarlar’dan token girin.',
+        needSettings: true,
+      };
+    }
+    const companies = await fetchCompaniesContacts();
+    return { ok: true, companies };
+  } catch (err) {
+    return { ok: false, companies: [], error: err.message || String(err) };
+  }
+});
+
+ipcMain.handle('teklif:create', async (_event, payload = {}) => {
+  try {
+    if (!config.hasAuthToken()) {
+      return {
+        ok: false,
+        error: 'JWT token yok. Ayarlar’dan token girin.',
+        needSettings: true,
+      };
+    }
+
+    const relId = Number(payload.relId) || 0;
+    const customerName = String(payload.customerName || '').trim();
+    const contactName = String(payload.contactName || '').trim();
+    const contactEmail = String(payload.contactEmail || '').trim();
+
     const last = await fetchLastNumber();
     let teklifName = last.nextTeklifNumber;
     let proposalId = last.nextId;
 
-    // API kaydı: subject = teklif no (POST create_safe / api/teklif)
-    const created = await createTeklifRecord(teklifName);
+    const created = await createTeklifRecord(teklifName, {
+      relId: relId > 0 ? relId : undefined,
+      proposalTo: contactName || customerName || undefined,
+      email: contactEmail || undefined,
+    });
     if (created.proposalId > 0) {
       proposalId = created.proposalId;
       teklifName = formatTeklifNumber(last.proposal_prefix, proposalId);
     }
 
-    const folder = createTeklifFolder(teklifName);
+    const folder = createTeklifFolder(teklifName, customerName || '');
+    const displayName = folder.folderLabel || teklifName;
+    const item = {
+      teklifName: displayName,
+      proposalId,
+      destPath: folder.destPath,
+      customerName: customerName || '',
+      createdAt: new Date().toISOString(),
+    };
+    history.add(item);
+
     return {
       ok: true,
-      teklifName,
+      teklifName: displayName,
+      proposalNumber: teklifName,
       proposalId,
+      customerName: customerName || '',
       api: {
         proposal_prefix: last.proposal_prefix,
         last_proposal_id: last.last_proposal_id,
@@ -166,6 +215,14 @@ ipcMain.handle('teklif:create', async () => {
     };
   } catch (err) {
     return { ok: false, error: err.message || String(err) };
+  }
+});
+
+ipcMain.handle('history:list', () => {
+  try {
+    return { ok: true, items: history.load() };
+  } catch (err) {
+    return { ok: false, items: [], error: err.message || String(err) };
   }
 });
 

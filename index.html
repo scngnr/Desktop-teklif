@@ -54,6 +54,9 @@
             <span class="nav-icon" aria-hidden="true">▣</span>
             <span class="nav-label">Panel</span>
           </button>
+
+          <p class="nav-section-label">Son teklifler</p>
+          <div class="history-list" id="historyList" aria-live="polite"></div>
         </nav>
       </aside>
 
@@ -61,6 +64,7 @@
         <section class="view" id="view-ayarlar" hidden>
           <header class="page-header">
             <h1>Ayarlar</h1>
+            <p class="subtitle" id="settingsHint">API erişimi için Base URL ve JWT token gerekli.</p>
           </header>
 
           <form class="settings-form" id="settingsForm">
@@ -78,7 +82,7 @@
 
             <label class="field">
               <span class="field-label">JWT Token</span>
-              <input type="password" id="inputJwt" name="authToken" placeholder="JWT token" autocomplete="off" spellcheck="false" required />
+              <input type="password" id="inputJwt" name="authToken" placeholder="JWT token girin" autocomplete="off" spellcheck="false" required />
             </label>
 
             <label class="show-jwt">
@@ -108,6 +112,39 @@
     <span class="fab-icon" aria-hidden="true">◇</span>
     <span class="fab-label">Yeni Teklif</span>
   </button>
+
+  <div class="modal-backdrop" id="confirmModal" hidden>
+    <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+      <h2 id="confirmTitle">Yeni teklif oluşturulsun mu?</h2>
+      <p class="modal-body">API’ye kayıt açılacak ve Masaüstüne teklif klasörü kopyalanacak. Müşteri seçilirse adı klasör ve Excel adına eklenir.</p>
+
+      <label class="field modal-field">
+        <span class="field-label">Müşteri ara</span>
+        <input type="search" id="customerSearch" placeholder="Firma adı yazın…" autocomplete="off" spellcheck="false" />
+      </label>
+
+      <label class="field modal-field">
+        <span class="field-label">Müşteri</span>
+        <select id="selectCustomer">
+          <option value="">— Seçilmedi (isteğe bağlı) —</option>
+        </select>
+      </label>
+
+      <label class="field modal-field">
+        <span class="field-label">Kişi</span>
+        <select id="selectContact" disabled>
+          <option value="">— Önce müşteri seçin —</option>
+        </select>
+      </label>
+
+      <p class="field-hint" id="folderNamePreview">Klasör / Excel: teklif no</p>
+
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" id="btnConfirmCancel">Vazgeç</button>
+        <button type="button" class="btn-primary" id="btnConfirmOk">Oluştur</button>
+      </div>
+    </div>
+  </div>
 
   <div class="toast-host" id="toastHost" aria-live="polite" aria-relevant="additions"></div>
   <script src="renderer.js"></script>

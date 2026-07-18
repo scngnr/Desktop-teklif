@@ -109,23 +109,76 @@ function extractProposalId(payload) {
 }
 
 /**
+ * GET /api/teklif/companies_contacts
+ */
+async function fetchCompaniesContacts() {
+  const result = await apiRequest('GET', 'api/teklif/companies_contacts');
+  if (!result.ok) {
+    throw new Error(
+      `Müşteri listesi alınamadı (HTTP ${result.status}): ${result.text.slice(0, 300)}`
+    );
+  }
+  const data = result.json;
+  if (!data || data.status === false) {
+    throw new Error(
+      `Müşteri listesi reddedildi: ${(data && data.message) || 'status false'}`
+    );
+  }
+
+  const companies = Array.isArray(data.companies) ? data.companies : [];
+  return companies.map((c) => ({
+    userid: Number(c.userid),
+    company: String(c.company || '').trim() || `Müşteri #${c.userid}`,
+    phonenumber: c.phonenumber || '',
+    contacts: Array.isArray(c.contacts)
+      ? c.contacts.map((ct) => ({
+          id: Number(ct.id),
+          userid: Number(ct.userid || c.userid),
+          firstname: String(ct.firstname || '').trim(),
+          lastname: String(ct.lastname || '').trim(),
+          email: String(ct.email || '').trim(),
+          phonenumber: String(ct.phonenumber || '').trim(),
+          is_primary: Number(ct.is_primary) === 1,
+          fullName: [ct.firstname, ct.lastname]
+            .map((x) => String(x || '').trim())
+            .filter(Boolean)
+            .join(' ')
+            .trim() || `Kişi #${ct.id}`,
+        }))
+      : [],
+  }));
+}
+
+/**
  * POST api/teklif/create_safe — VBA MrpApi_TeklifCreate
  * subject olarak teklif numarası gönderilir.
  * create_safe yoksa api/teklif'e düşer.
+ * @param {string} teklifNumber
+ * @param {{ relId?: number, proposalTo?: string, email?: string }} [options]
  */
-async function createTeklifRecord(teklifNumber) {
+async function createTeklifRecord(teklifNumber, options = {}) {
   const cfg = config.get();
   const today = new Date();
   const yyyy = today.getFullYear();
   const mm = String(today.getMonth() + 1).padStart(2, '0');
   const dd = String(today.getDate()).padStart(2, '0');
 
+  const relId = Number(options.relId) > 0 ? Number(options.relId) : Number(cfg.defaultRelId) || 1;
+  const proposalTo =
+    String(options.proposalTo || '').trim() ||
+    cfg.defaultProposalTo ||
+    'Desktop Teklif';
+  const email =
+    String(options.email || '').trim() ||
+    cfg.defaultEmail ||
+    'no-reply@local.invalid';
+
   const body = {
     subject: teklifNumber,
     rel_type: 'customer',
-    rel_id: Number(cfg.defaultRelId) || 1,
-    proposal_to: cfg.defaultProposalTo || 'Desktop Teklif',
-    email: cfg.defaultEmail || 'no-reply@local.invalid',
+    rel_id: relId,
+    proposal_to: proposalTo,
+    email,
     date: `${yyyy}-${mm}-${dd}`,
     currency: '1',
     status: '6',
@@ -285,6 +338,7 @@ module.exports = {
   computeNextTeklifNumber,
   formatTeklifNumber,
   fetchLastNumber,
+  fetchCompaniesContacts,
   createTeklifRecord,
   fetchCompanyName,
   decodeTokenOwner,

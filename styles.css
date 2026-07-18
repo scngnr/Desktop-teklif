@@ -370,6 +370,73 @@ button, input {
   opacity: 0.85;
 }
 
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+}
+
+.history-empty {
+  padding: 8px 12px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.history-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.history-item:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(42, 58, 79, 0.8);
+}
+
+.history-name {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: inherit;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-meta {
+  font-size: 0.68rem;
+  opacity: 0.8;
+}
+
+.layout.sidebar-collapsed .history-empty,
+.layout.sidebar-collapsed .history-meta,
+.layout.sidebar-collapsed .history-name {
+  display: none;
+}
+
+.layout.sidebar-collapsed .history-item {
+  min-height: 28px;
+  padding: 6px 0;
+  align-items: center;
+}
+
+.layout.sidebar-collapsed .history-item::before {
+  content: "•";
+  color: var(--muted);
+}
+
 .content {
   flex: 1;
   min-width: 0;
@@ -557,6 +624,24 @@ button:disabled {
   word-break: break-word;
 }
 
+.toast-action {
+  flex-shrink: 0;
+  align-self: center;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-size: 0.75rem;
+  font-weight: 650;
+  padding: 5px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.toast-action:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
 .toast-close {
   flex-shrink: 0;
   width: 24px;
@@ -575,6 +660,83 @@ button:disabled {
 .toast-close:hover {
   opacity: 1;
   background: rgba(255, 255, 255, 0.08);
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 20px;
+}
+
+.modal-backdrop[hidden] {
+  display: none !important;
+}
+
+.modal {
+  width: min(400px, 100%);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px 20px 16px;
+  color: var(--text);
+}
+
+.modal.modal-wide {
+  width: min(460px, 100%);
+}
+
+.modal-field {
+  margin-top: 14px;
+}
+
+.modal-field select,
+.modal-field input[type="search"] {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 10px 12px;
+  font-size: 0.9rem;
+  outline: none;
+  width: 100%;
+  user-select: text;
+}
+
+.modal-field select:focus,
+.modal-field input[type="search"]:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(31, 111, 235, 0.2);
+}
+
+.modal-field select:disabled {
+  opacity: 0.55;
+}
+
+.modal h2 {
+  font-size: 1.05rem;
+  font-weight: 650;
+}
+
+.modal-body {
+  margin-top: 8px;
+  font-size: 0.88rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.modal-actions {
+  margin-top: 18px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.modal-actions .btn-secondary {
+  margin-top: 0;
 }
 
 /* —— Settings —— */

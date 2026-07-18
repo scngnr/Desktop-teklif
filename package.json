@@ -18,8 +18,10 @@
     "appId": "tr.epron.desktop-teklif",
     "productName": "Desktop Teklif",
     "directories": {
-      "output": "dist"
+      "output": "dist",
+      "buildResources": "build"
     },
+    "icon": "build/icon.png",
     "files": [
       "main.js",
       "preload.js",
@@ -27,6 +29,7 @@
       "renderer.js",
       "styles.css",
       "src/**/*",
+      "build/icon.png",
       "package.json"
     ],
     "extraResources": [

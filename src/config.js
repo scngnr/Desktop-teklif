@@ -6,8 +6,7 @@ const DEFAULTS = {
   baseUrl: 'https://mrp.cangungor.tr',
   firmaAdi: '',
   authHeaderName: 'authtoken',
-  authToken:
-    'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VyIjoibXJwIiwibmFtZSI6InNlcmNhbiIsIkFQSV9USU1FIjoxNzc1Mjk0MTg0fQ._80qqKXalOBUCQgIfD2eoiDQOg59d3VqgRAwk2PVnjM',
+  authToken: '',
   lastNumberPath: '/api/teklif/last_number',
   sampleFolderName: 'örnek klasör',
   teklifSubfolder: '4-Teklif',
@@ -99,12 +98,17 @@ function get() {
   return runtime;
 }
 
+function hasAuthToken() {
+  return Boolean(String(runtime.authToken || '').trim());
+}
+
 function getPublic() {
   return {
     baseUrl: runtime.baseUrl,
     firmaAdi: runtime.firmaAdi,
     adminRoot: buildAdminRoot(runtime.baseUrl, runtime.firmaAdi),
     authToken: runtime.authToken,
+    hasAuthToken: hasAuthToken(),
     lastNumberPath: runtime.lastNumberPath,
     authHeaderName: runtime.authHeaderName,
     sampleFolderName: runtime.sampleFolderName,
@@ -116,6 +120,7 @@ module.exports = {
   save,
   get,
   getPublic,
+  hasAuthToken,
   buildAdminRoot,
   normalizeFirmaAdi,
   DEFAULTS,

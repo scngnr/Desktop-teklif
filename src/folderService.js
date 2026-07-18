@@ -93,27 +93,49 @@ function renameTeklifExcels(teklifFolderPath, teklifName) {
   return renamed;
 }
 
-function createTeklifFolder(teklifName) {
-  if (!teklifName || typeof teklifName !== 'string') {
-    throw new Error('Geçersiz teklif adı.');
-  }
+function sanitizeNamePart(name) {
+  return String(name || '')
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[. ]+$/g, '')
+    .slice(0, 80);
+}
+
+/** Teklif no + isteğe bağlı müşteri adı → klasör/excel adı */
+function buildFolderLabel(teklifName, customerName) {
+  const base = sanitizeNamePart(teklifName);
+  if (!base) throw new Error('Geçersiz teklif adı.');
+  const customer = sanitizeNamePart(customerName);
+  return customer ? `${base} ${customer}` : base;
+}
+
+function createTeklifFolder(teklifName, customerName) {
+  const folderLabel = buildFolderLabel(teklifName, customerName);
 
   const sampleSource = resolveSampleFolder();
   const desktop = path.join(os.homedir(), 'Desktop');
-  const destPath = path.join(desktop, teklifName);
+  const destPath = path.join(desktop, folderLabel);
 
   if (fs.existsSync(destPath)) {
     throw new Error(`Hedef klasör zaten mevcut: ${destPath}`);
   }
 
   copyDirRecursive(sampleSource, destPath);
-  const renamedExcels = renameTeklifExcels(destPath, teklifName);
+  const renamedExcels = renameTeklifExcels(destPath, folderLabel);
 
-  return { destPath, sampleSource, renamedExcels };
+  return {
+    destPath,
+    sampleSource,
+    renamedExcels,
+    folderLabel,
+  };
 }
 
 module.exports = {
   resolveSampleFolder,
   createTeklifFolder,
+  buildFolderLabel,
+  sanitizeNamePart,
   getSampleFolderCandidates,
 };
