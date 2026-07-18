@@ -116,7 +116,7 @@
   <div class="modal-backdrop" id="confirmModal" hidden>
     <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
       <h2 id="confirmTitle">Yeni teklif oluşturulsun mu?</h2>
-      <p class="modal-body">API’ye kayıt açılacak ve Masaüstüne teklif klasörü kopyalanacak. Müşteri seçilirse adı klasör ve Excel adına eklenir.</p>
+      <p class="modal-body">API’ye kayıt açılacak ve Masaüstüne teklif klasörü kopyalanacak. İsim: teklif no - firma adı - proje adı. Proje adı API’de proposal_to olarak yazılır.</p>
 
       <label class="field modal-field">
         <span class="field-label">Müşteri ara</span>
@@ -137,7 +137,12 @@
         </select>
       </label>
 
-      <p class="field-hint" id="folderNamePreview">Klasör / Excel: teklif no</p>
+      <label class="field modal-field">
+        <span class="field-label">Proje adı</span>
+        <input type="text" id="inputProjectName" placeholder="İsteğe bağlı proje adı" autocomplete="off" spellcheck="false" />
+      </label>
+
+      <p class="field-hint" id="folderNamePreview">Klasör / Excel: teklif-no</p>
 
       <div class="modal-actions">
         <button type="button" class="btn-secondary" id="btnConfirmCancel">Vazgeç</button>

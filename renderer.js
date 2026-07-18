@@ -26,6 +26,7 @@ const customerSearch = document.getElementById('customerSearch');
 const selectCustomer = document.getElementById('selectCustomer');
 const selectContact = document.getElementById('selectContact');
 const folderNamePreview = document.getElementById('folderNamePreview');
+const inputProjectName = document.getElementById('inputProjectName');
 
 const SIDEBAR_KEY = 'desktop-teklif-sidebar-collapsed';
 const CREATE_LABEL = 'Yeni Teklif';
@@ -348,14 +349,17 @@ function getSelectedContact() {
   return (company.contacts || []).find((ct) => ct.id === id) || null;
 }
 
-function updateFolderPreview() {
+function buildNamePreviewParts() {
   const company = getSelectedCompany();
-  if (company) {
-    folderNamePreview.textContent =
-      'Klasör / Excel: teklif-no ' + company.company;
-  } else {
-    folderNamePreview.textContent = 'Klasör / Excel: teklif-no (müşteri seçilmedi)';
-  }
+  const project = String(inputProjectName.value || '').trim();
+  const parts = ['teklif-no'];
+  if (company) parts.push(company.company);
+  if (project) parts.push(project);
+  return parts.join(' - ');
+}
+
+function updateFolderPreview() {
+  folderNamePreview.textContent = 'Klasör / Excel: ' + buildNamePreviewParts();
 }
 
 function fillContactSelect(company) {
@@ -468,7 +472,9 @@ async function loadCustomersForModal() {
 async function openConfirmModal() {
   confirmModal.hidden = false;
   customerSearch.value = '';
+  inputProjectName.value = '';
   await loadCustomersForModal();
+  updateFolderPreview();
   customerSearch.focus();
 }
 
@@ -479,16 +485,18 @@ function closeConfirmModal() {
 function getCreatePayload() {
   const company = getSelectedCompany();
   const contact = getSelectedContact();
-  if (!company) return {};
-  return {
-    relId: company.userid,
-    customerName: company.company,
-    contactName: contact ? contact.fullName : company.company,
-    contactEmail:
-      contact && contact.email && contact.email !== '-'
-        ? contact.email
-        : '',
-  };
+  const projectName = String(inputProjectName.value || '').trim();
+  const payload = {};
+  if (projectName) payload.projectName = projectName;
+  if (!company) return payload;
+  payload.relId = company.userid;
+  payload.customerName = company.company;
+  payload.contactName = contact ? contact.fullName : company.company;
+  payload.contactEmail =
+    contact && contact.email && contact.email !== '-'
+      ? contact.email
+      : '';
+  return payload;
 }
 
 async function showView(viewId, options = {}) {
@@ -624,6 +632,10 @@ selectCustomer.addEventListener('change', () => {
 });
 
 selectContact.addEventListener('change', () => {
+  updateFolderPreview();
+});
+
+inputProjectName.addEventListener('input', () => {
   updateFolderPreview();
 });
 

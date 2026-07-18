@@ -170,14 +170,19 @@ ipcMain.handle('teklif:create', async (_event, payload = {}) => {
     const customerName = String(payload.customerName || '').trim();
     const contactName = String(payload.contactName || '').trim();
     const contactEmail = String(payload.contactEmail || '').trim();
+    const projectName = String(payload.projectName || '').trim();
 
     const last = await fetchLastNumber();
     let teklifName = last.nextTeklifNumber;
     let proposalId = last.nextId;
 
+    // proposal_to: proje adı (yoksa kişi/firma); Desktop Teklif yerine
+    const proposalTo =
+      projectName || contactName || customerName || undefined;
+
     const created = await createTeklifRecord(teklifName, {
       relId: relId > 0 ? relId : undefined,
-      proposalTo: contactName || customerName || undefined,
+      proposalTo,
       email: contactEmail || undefined,
     });
     if (created.proposalId > 0) {
@@ -185,13 +190,18 @@ ipcMain.handle('teklif:create', async (_event, payload = {}) => {
       teklifName = formatTeklifNumber(last.proposal_prefix, proposalId);
     }
 
-    const folder = createTeklifFolder(teklifName, customerName || '');
+    const folder = createTeklifFolder(
+      teklifName,
+      customerName || '',
+      projectName || ''
+    );
     const displayName = folder.folderLabel || teklifName;
     const item = {
       teklifName: displayName,
       proposalId,
       destPath: folder.destPath,
       customerName: customerName || '',
+      projectName: projectName || '',
       createdAt: new Date().toISOString(),
     };
     history.add(item);
@@ -202,6 +212,7 @@ ipcMain.handle('teklif:create', async (_event, payload = {}) => {
       proposalNumber: teklifName,
       proposalId,
       customerName: customerName || '',
+      projectName: projectName || '',
       api: {
         proposal_prefix: last.proposal_prefix,
         last_proposal_id: last.last_proposal_id,

@@ -102,16 +102,19 @@ function sanitizeNamePart(name) {
     .slice(0, 80);
 }
 
-/** Teklif no + isteğe bağlı müşteri adı → klasör/excel adı */
-function buildFolderLabel(teklifName, customerName) {
-  const base = sanitizeNamePart(teklifName);
-  if (!base) throw new Error('Geçersiz teklif adı.');
-  const customer = sanitizeNamePart(customerName);
-  return customer ? `${base} ${customer}` : base;
+/** Teklif no - firmaadı - projeadı → klasör/excel adı */
+function buildFolderLabel(teklifName, customerName, projectName) {
+  const parts = [
+    sanitizeNamePart(teklifName),
+    sanitizeNamePart(customerName),
+    sanitizeNamePart(projectName),
+  ].filter(Boolean);
+  if (!parts.length) throw new Error('Geçersiz teklif adı.');
+  return parts.join(' - ');
 }
 
-function createTeklifFolder(teklifName, customerName) {
-  const folderLabel = buildFolderLabel(teklifName, customerName);
+function createTeklifFolder(teklifName, customerName, projectName) {
+  const folderLabel = buildFolderLabel(teklifName, customerName, projectName);
 
   const sampleSource = resolveSampleFolder();
   const desktop = path.join(os.homedir(), 'Desktop');
