@@ -36,6 +36,15 @@ npm run dist       # Windows portable exe → dist/
 - Giriş yapılmış web oturumunda sidebar gizlenir; **Yeni Teklif** sağ alt FAB olur.
 - Titlebar firma adı, `/admin/api/api_guide` login sayfasından okunur.
 
+## Excel VBA — JWT’yi Desktop Teklif’ten okuma
+
+Ayarlardaki JWT dosyası: `%AppData%\desktop-teklif\settings.json` (`authToken`).
+
+1. `vba/MrpApi_DesktopTeklifSettings.bas` dosyasını Excel VBA projesine **Import** edin  
+2. `MrpApi` içinde `EXAMPLE_JWT` değerini boşaltın  
+3. `MrpApi_Example_Configure` gövdesini `vba/MrpApi_Example_Configure_Replace.txt` ile değiştirin  
+4. Immediate: `MrpApi_Example_Configure` → `? MrpApi_IsConfigured`
+
 ## Repo
 
 https://github.com/scngnr/Desktop-teklif
