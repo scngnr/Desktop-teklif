@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('teklifApp', {
   getUserInfo: () => ipcRenderer.invoke('user:info'),
   resolveSample: () => ipcRenderer.invoke('sample:resolve'),
   createTeklif: (payload) => ipcRenderer.invoke('teklif:create', payload || {}),
+  previewNextTeklif: () => ipcRenderer.invoke('teklif:previewNext'),
   listCustomers: () => ipcRenderer.invoke('customers:list'),
   openPath: (p) => ipcRenderer.invoke('shell:openPath', p),
   isWebLoggedIn: () => ipcRenderer.invoke('session:isLoggedIn'),

@@ -8,6 +8,7 @@ const {
   screen,
 } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const config = require('./src/config');
 const {
   fetchLastNumber,
@@ -235,7 +236,10 @@ function openTeklifModalWindow() {
 }
 
 function createWindow() {
-  const iconPath = path.join(__dirname, 'build', 'icon.png');
+  const icoPath = path.join(__dirname, 'build', 'icon.ico');
+  const iconPath = fs.existsSync(icoPath)
+    ? icoPath
+    : path.join(__dirname, 'build', 'icon.png');
   mainWindow = new BrowserWindow({
     width: 1180,
     height: 760,
@@ -364,6 +368,27 @@ ipcMain.handle('sample:resolve', () => {
     return { ok: true, path: resolveSampleFolder() };
   } catch (err) {
     return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('teklif:previewNext', async () => {
+  try {
+    if (!config.hasAuthToken()) {
+      return {
+        ok: false,
+        error: 'JWT token yok. Ayarlar’dan token girin.',
+        needSettings: true,
+      };
+    }
+    const last = await fetchLastNumber();
+    return {
+      ok: true,
+      nextTeklifNumber: last.nextTeklifNumber,
+      proposal_prefix: last.proposal_prefix,
+      last_proposal_id: last.last_proposal_id,
+    };
+  } catch (err) {
+    return { ok: false, error: err.message || String(err) };
   }
 });
 

@@ -21,7 +21,7 @@
       "output": "dist",
       "buildResources": "build"
     },
-    "icon": "build/icon.png",
+    "icon": "build/icon.ico",
     "files": [
       "main.js",
       "preload.js",
@@ -36,6 +36,7 @@
       "styles.css",
       "src/**/*",
       "build/icon.png",
+      "build/icon.ico",
       "package.json"
     ],
     "extraResources": [
@@ -45,6 +46,7 @@
       }
     ],
     "win": {
+      "icon": "build/icon.ico",
       "signAndEditExecutable": false,
       "target": [
         {

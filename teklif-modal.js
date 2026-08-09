@@ -12,6 +12,7 @@ let toastTimer = null;
 let companiesCache = [];
 let customersLoading = false;
 let creatingTeklif = false;
+let previewTeklifNo = 'teklif-no';
 
 function showToast(message, kind = 'info', durationMs = 4200, action = null) {
   const text = String(message || '').trim();
@@ -63,10 +64,23 @@ function getSelectedContact() {
 function buildNamePreviewParts() {
   const company = getSelectedCompany();
   const project = String(inputProjectName.value || '').trim();
-  const parts = ['teklif-no'];
+  const parts = [previewTeklifNo || 'teklif-no'];
   if (company) parts.push(company.company);
   if (project) parts.push(project);
   return parts.join(' - ');
+}
+
+async function loadTeklifNumberPreview() {
+  previewTeklifNo = 'teklif-no';
+  try {
+    const result = await window.teklifModal.previewNextTeklif();
+    if (result && result.ok && result.nextTeklifNumber) {
+      previewTeklifNo = result.nextTeklifNumber;
+    }
+  } catch {
+    // önizleme zorunlu değil
+  }
+  updateFolderPreview();
 }
 
 function updateFolderPreview() {
@@ -196,6 +210,9 @@ function setBusy(busy) {
   btnConfirmOk.disabled = busy;
   btnConfirmCancel.disabled = busy;
   btnConfirmOk.textContent = busy ? 'Oluşturuluyor…' : 'Oluştur';
+  if (window.teklifModal.setDesktopFabBusy) {
+    window.teklifModal.setDesktopFabBusy(busy);
+  }
 }
 
 async function createTeklifAction(payload = {}) {
@@ -281,7 +298,8 @@ document.addEventListener('keydown', (e) => {
 
 customerSearch.value = '';
 inputProjectName.value = '';
-loadCustomersForModal().then(() => {
-  updateFolderPreview();
+previewTeklifNo = 'yükleniyor…';
+updateFolderPreview();
+Promise.all([loadCustomersForModal(), loadTeklifNumberPreview()]).then(() => {
   customerSearch.focus();
 });

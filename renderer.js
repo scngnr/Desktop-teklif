@@ -46,6 +46,7 @@ let companiesCache = [];
 let customersLoading = false;
 let licenseOk = false;
 let lastLicense = null;
+let previewTeklifNo = 'teklif-no';
 
 function showToast(message, kind = 'info', durationMs = 4200, action = null) {
   const text = String(message || '').trim();
@@ -423,10 +424,23 @@ function getSelectedContact() {
 function buildNamePreviewParts() {
   const company = getSelectedCompany();
   const project = String(inputProjectName.value || '').trim();
-  const parts = ['teklif-no'];
+  const parts = [previewTeklifNo || 'teklif-no'];
   if (company) parts.push(company.company);
   if (project) parts.push(project);
   return parts.join(' - ');
+}
+
+async function loadTeklifNumberPreview() {
+  previewTeklifNo = 'teklif-no';
+  try {
+    const result = await window.teklifApp.previewNextTeklif();
+    if (result && result.ok && result.nextTeklifNumber) {
+      previewTeklifNo = result.nextTeklifNumber;
+    }
+  } catch {
+    // önizleme zorunlu değil
+  }
+  updateFolderPreview();
 }
 
 function updateFolderPreview() {
@@ -544,8 +558,9 @@ async function openConfirmModal() {
   confirmModal.hidden = false;
   customerSearch.value = '';
   inputProjectName.value = '';
-  await loadCustomersForModal();
+  previewTeklifNo = 'yükleniyor…';
   updateFolderPreview();
+  await Promise.all([loadCustomersForModal(), loadTeklifNumberPreview()]);
   customerSearch.focus();
 }
 
