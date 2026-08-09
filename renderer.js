@@ -12,6 +12,7 @@ const inputFirmaAdi = document.getElementById('inputFirmaAdi');
 const girisUrlPreview = document.getElementById('girisUrlPreview');
 const inputJwt = document.getElementById('inputJwt');
 const toggleJwtVisible = document.getElementById('toggleJwtVisible');
+const toggleDesktopFab = document.getElementById('toggleDesktopFab');
 const userNameEl = document.getElementById('userName');
 const userRoleEl = document.getElementById('userRole');
 const userAvatarEl = document.getElementById('userAvatar');
@@ -174,6 +175,9 @@ function setCreateBusy(busy) {
   if (navLabel) navLabel.textContent = label;
   if (fabLabel) fabLabel.textContent = label;
   syncCreateButtonsEnabled();
+  if (window.teklifApp.setDesktopFabBusy) {
+    window.teklifApp.setDesktopFabBusy(busy);
+  }
 }
 
 function setLicenseStatusUi(status) {
@@ -322,6 +326,7 @@ async function loadSettingsForm() {
   inputBaseUrl.value = cfg.baseUrl || '';
   inputFirmaAdi.value = cfg.firmaAdi || '';
   inputJwt.value = cfg.authToken || '';
+  toggleDesktopFab.checked = !!cfg.showDesktopFab;
   settingsHint.textContent = cfg.hasAuthToken
     ? 'API erişimi için Base URL ve JWT token gerekli.'
     : 'İlk kurulum: JWT token girmeden teklif oluşturulamaz.';
@@ -759,6 +764,7 @@ settingsForm.addEventListener('submit', async (e) => {
     baseUrl: inputBaseUrl.value.trim(),
     firmaAdi: inputFirmaAdi.value.trim(),
     authToken: inputJwt.value.trim(),
+    showDesktopFab: !!toggleDesktopFab.checked,
   });
 
   if (!result.ok) {
@@ -800,6 +806,10 @@ window.teklifApp.onSessionChanged((payload) => {
       showView('web', { path: lastWebPath || '' });
     }
   }
+});
+
+window.teklifApp.onOpenFromFab(() => {
+  requestCreateTeklif();
 });
 
 restoreSidebarState();

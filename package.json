@@ -25,6 +25,9 @@
     "files": [
       "main.js",
       "preload.js",
+      "preload-fab.js",
+      "fab.html",
+      "fab.js",
       "index.html",
       "renderer.js",
       "styles.css",

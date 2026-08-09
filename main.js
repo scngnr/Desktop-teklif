@@ -1,4 +1,12 @@
-const { app, BrowserWindow, ipcMain, shell, Menu, session } = require('electron');
+const {
+  app,
+  BrowserWindow,
+  ipcMain,
+  shell,
+  Menu,
+  session,
+  screen,
+} = require('electron');
 const path = require('path');
 const config = require('./src/config');
 const {
@@ -19,7 +27,13 @@ let lastLicenseStatus = null;
 const SESSION_COOKIE_RE =
   /^(sp_session|ci_session|PHPSESSID|laravel_session|remember|session)/i;
 
+const FAB_W = 188;
+const FAB_H = 64;
+const FAB_MARGIN = 22;
+
 let mainWindow = null;
+let fabWindow = null;
+let fabBusy = false;
 
 function getMrpSession() {
   return session.fromPartition(WEBVIEW_PARTITION);
@@ -49,6 +63,95 @@ async function isWebLoggedIn() {
   return { ok: true, loggedIn, cookieNames: names };
 }
 
+function positionFabWindow() {
+  if (!fabWindow || fabWindow.isDestroyed()) return;
+  const display = screen.getPrimaryDisplay();
+  const area = display.workArea;
+  const x = Math.round(area.x + area.width - FAB_W - FAB_MARGIN);
+  const y = Math.round(area.y + area.height - FAB_H - FAB_MARGIN);
+  fabWindow.setBounds({ x, y, width: FAB_W, height: FAB_H });
+}
+
+function canUseDesktopFab() {
+  const licensed = !!(lastLicenseStatus && lastLicenseStatus.licensed);
+  return config.hasAuthToken() && licensed && !fabBusy;
+}
+
+function pushFabState() {
+  if (!fabWindow || fabWindow.isDestroyed()) return;
+  fabWindow.webContents.send('desktop-fab:state', {
+    enabled: canUseDesktopFab(),
+    busy: fabBusy,
+  });
+}
+
+function destroyFabWindow() {
+  if (!fabWindow || fabWindow.isDestroyed()) {
+    fabWindow = null;
+    return;
+  }
+  fabWindow.destroy();
+  fabWindow = null;
+}
+
+function createFabWindow() {
+  if (fabWindow && !fabWindow.isDestroyed()) {
+    positionFabWindow();
+    pushFabState();
+    if (!fabWindow.isVisible()) fabWindow.showInactive();
+    return;
+  }
+
+  fabWindow = new BrowserWindow({
+    width: FAB_W,
+    height: FAB_H,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    hasShadow: false,
+    show: false,
+    focusable: true,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload-fab.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  fabWindow.setAlwaysOnTop(true, 'screen-saver');
+  fabWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  positionFabWindow();
+  fabWindow.loadFile('fab.html');
+  fabWindow.once('ready-to-show', () => {
+    if (!fabWindow || fabWindow.isDestroyed()) return;
+    fabWindow.showInactive();
+    pushFabState();
+  });
+  fabWindow.on('closed', () => {
+    fabWindow = null;
+  });
+}
+
+function syncDesktopFab() {
+  const enabled = !!config.getPublic().showDesktopFab;
+  if (enabled) createFabWindow();
+  else destroyFabWindow();
+}
+
+function focusMainForTeklif() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+  mainWindow.webContents.send('teklif:open-from-fab');
+}
+
 function createWindow() {
   const iconPath = path.join(__dirname, 'build', 'icon.png');
   mainWindow = new BrowserWindow({
@@ -71,13 +174,24 @@ function createWindow() {
 
   mainWindow.setMenuBarVisibility(false);
   mainWindow.loadFile('index.html');
-  mainWindow.once('ready-to-show', () => mainWindow.show());
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.show();
+    syncDesktopFab();
+  });
+  mainWindow.on('closed', () => {
+    destroyFabWindow();
+    mainWindow = null;
+  });
 }
 
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
   config.load();
   createWindow();
+
+  screen.on('display-metrics-changed', () => positionFabWindow());
+  screen.on('display-added', () => positionFabWindow());
+  screen.on('display-removed', () => positionFabWindow());
 
   const mrpSession = getMrpSession();
   let cookieNotifyTimer = null;
@@ -99,6 +213,7 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  destroyFabWindow();
   if (process.platform !== 'darwin') app.quit();
 });
 
@@ -115,10 +230,27 @@ ipcMain.handle('config:get', () => getConfigPublic());
 ipcMain.handle('config:save', (_event, partial) => {
   try {
     const saved = config.save(partial || {});
+    syncDesktopFab();
+    pushFabState();
     return { ok: true, config: saved };
   } catch (err) {
     return { ok: false, error: err.message || String(err) };
   }
+});
+
+ipcMain.on('desktop-fab:ready', () => {
+  pushFabState();
+});
+
+ipcMain.handle('desktop-fab:click', () => {
+  focusMainForTeklif();
+  return { ok: true };
+});
+
+ipcMain.handle('desktop-fab:setBusy', (_event, busy) => {
+  fabBusy = !!busy;
+  pushFabState();
+  return { ok: true };
 });
 
 ipcMain.handle('user:info', () => {
@@ -166,6 +298,7 @@ ipcMain.handle('license:check', async () => {
       firmaAdi: config.getPublic().firmaAdi || undefined,
     });
     lastLicenseStatus = status;
+    pushFabState();
     return status;
   } catch (err) {
     lastLicenseStatus = {
@@ -174,6 +307,7 @@ ipcMain.handle('license:check', async () => {
       error: err.message || String(err),
       apiReachable: false,
     };
+    pushFabState();
     return lastLicenseStatus;
   }
 });

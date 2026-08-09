@@ -7,6 +7,8 @@ const DEFAULTS = {
   firmaAdi: '',
   authHeaderName: 'authtoken',
   authToken: '',
+  /** Uygulama açıkken ekran sağ altında yüzen Yeni Teklif butonu */
+  showDesktopFab: false,
   lastNumberPath: '/api/teklif/last_number',
   sampleFolderName: 'örnek klasör',
   teklifSubfolder: '4-Teklif',
@@ -59,6 +61,9 @@ function load() {
       runtime.firmaAdi = normalizeFirmaAdi(raw.firmaAdi);
     }
     if (typeof raw.authToken === 'string') runtime.authToken = raw.authToken.trim();
+    if (typeof raw.showDesktopFab === 'boolean') {
+      runtime.showDesktopFab = raw.showDesktopFab;
+    }
   } catch {
     // varsayılanlarla devam
   }
@@ -74,6 +79,9 @@ function save(partial) {
   if (partial.authToken !== undefined) {
     runtime.authToken = String(partial.authToken || '').trim();
   }
+  if (partial.showDesktopFab !== undefined) {
+    runtime.showDesktopFab = !!partial.showDesktopFab;
+  }
 
   const file = settingsPath();
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -84,6 +92,7 @@ function save(partial) {
         baseUrl: runtime.baseUrl,
         firmaAdi: runtime.firmaAdi,
         authToken: runtime.authToken,
+        showDesktopFab: !!runtime.showDesktopFab,
       },
       null,
       2
@@ -109,6 +118,7 @@ function getPublic() {
     adminRoot: buildAdminRoot(runtime.baseUrl, runtime.firmaAdi),
     authToken: runtime.authToken,
     hasAuthToken: hasAuthToken(),
+    showDesktopFab: !!runtime.showDesktopFab,
     lastNumberPath: runtime.lastNumberPath,
     authHeaderName: runtime.authHeaderName,
     sampleFolderName: runtime.sampleFolderName,

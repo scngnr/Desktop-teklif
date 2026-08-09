@@ -14,9 +14,15 @@ contextBridge.exposeInMainWorld('teklifApp', {
   getCompanyName: () => ipcRenderer.invoke('company:name'),
   listHistory: () => ipcRenderer.invoke('history:list'),
   checkLicense: () => ipcRenderer.invoke('license:check'),
+  setDesktopFabBusy: (busy) => ipcRenderer.invoke('desktop-fab:setBusy', !!busy),
   onSessionChanged: (handler) => {
     const listener = (_event, payload) => handler(payload);
     ipcRenderer.on('session:changed', listener);
     return () => ipcRenderer.removeListener('session:changed', listener);
+  },
+  onOpenFromFab: (handler) => {
+    const listener = () => handler();
+    ipcRenderer.on('teklif:open-from-fab', listener);
+    return () => ipcRenderer.removeListener('teklif:open-from-fab', listener);
   },
 });
