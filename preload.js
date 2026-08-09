@@ -20,9 +20,9 @@ contextBridge.exposeInMainWorld('teklifApp', {
     ipcRenderer.on('session:changed', listener);
     return () => ipcRenderer.removeListener('session:changed', listener);
   },
-  onOpenFromFab: (handler) => {
+  onHistoryChanged: (handler) => {
     const listener = () => handler();
-    ipcRenderer.on('teklif:open-from-fab', listener);
-    return () => ipcRenderer.removeListener('teklif:open-from-fab', listener);
+    ipcRenderer.on('history:changed', listener);
+    return () => ipcRenderer.removeListener('history:changed', listener);
   },
 });

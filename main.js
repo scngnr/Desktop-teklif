@@ -30,9 +30,12 @@ const SESSION_COOKIE_RE =
 const FAB_W = 188;
 const FAB_H = 64;
 const FAB_MARGIN = 22;
+const TEKLIF_MODAL_W = 520;
+const TEKLIF_MODAL_H = 620;
 
 let mainWindow = null;
 let fabWindow = null;
+let teklifModalWindow = null;
 let fabBusy = false;
 
 function getMrpSession() {
@@ -74,7 +77,8 @@ function positionFabWindow() {
 
 function canUseDesktopFab() {
   const licensed = !!(lastLicenseStatus && lastLicenseStatus.licensed);
-  return config.hasAuthToken() && licensed && !fabBusy;
+  const modalOpen = !!(teklifModalWindow && !teklifModalWindow.isDestroyed());
+  return config.hasAuthToken() && licensed && !fabBusy && !modalOpen;
 }
 
 function pushFabState() {
@@ -144,12 +148,90 @@ function syncDesktopFab() {
   else destroyFabWindow();
 }
 
-function focusMainForTeklif() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.show();
-  mainWindow.focus();
-  mainWindow.webContents.send('teklif:open-from-fab');
+function destroyTeklifModalWindow() {
+  if (!teklifModalWindow || teklifModalWindow.isDestroyed()) {
+    teklifModalWindow = null;
+    return;
+  }
+  teklifModalWindow.destroy();
+  teklifModalWindow = null;
+}
+
+function positionTeklifModalWindow() {
+  if (!teklifModalWindow || teklifModalWindow.isDestroyed()) return;
+  const display = screen.getPrimaryDisplay();
+  const area = display.workArea;
+  const x = Math.round(area.x + (area.width - TEKLIF_MODAL_W) / 2);
+  const y = Math.round(area.y + (area.height - TEKLIF_MODAL_H) / 2);
+  teklifModalWindow.setBounds({
+    x,
+    y,
+    width: TEKLIF_MODAL_W,
+    height: TEKLIF_MODAL_H,
+  });
+}
+
+function openTeklifModalWindow() {
+  if (teklifModalWindow && !teklifModalWindow.isDestroyed()) {
+    teklifModalWindow.show();
+    teklifModalWindow.focus();
+    return { ok: true };
+  }
+
+  if (
+    !config.hasAuthToken() ||
+    !(lastLicenseStatus && lastLicenseStatus.licensed) ||
+    fabBusy
+  ) {
+    return { ok: false, error: 'JWT veya lisans eksik' };
+  }
+
+  teklifModalWindow = new BrowserWindow({
+    width: TEKLIF_MODAL_W,
+    height: TEKLIF_MODAL_H,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    hasShadow: false,
+    show: false,
+    focusable: true,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload-teklif-modal.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  teklifModalWindow.setAlwaysOnTop(true, 'screen-saver');
+  teklifModalWindow.setVisibleOnAllWorkspaces(true, {
+    visibleOnFullScreen: true,
+  });
+  positionTeklifModalWindow();
+  teklifModalWindow.loadFile('teklif-modal.html');
+  teklifModalWindow.once('ready-to-show', () => {
+    if (!teklifModalWindow || teklifModalWindow.isDestroyed()) return;
+    teklifModalWindow.show();
+    teklifModalWindow.focus();
+  });
+  teklifModalWindow.on('closed', () => {
+    teklifModalWindow = null;
+    pushFabState();
+    if (fabWindow && !fabWindow.isDestroyed() && config.getPublic().showDesktopFab) {
+      fabWindow.showInactive();
+    }
+  });
+
+  if (fabWindow && !fabWindow.isDestroyed()) {
+    fabWindow.hide();
+  }
+  pushFabState();
+  return { ok: true };
 }
 
 function createWindow() {
@@ -179,6 +261,7 @@ function createWindow() {
     syncDesktopFab();
   });
   mainWindow.on('closed', () => {
+    destroyTeklifModalWindow();
     destroyFabWindow();
     mainWindow = null;
   });
@@ -213,6 +296,7 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  destroyTeklifModalWindow();
   destroyFabWindow();
   if (process.platform !== 'darwin') app.quit();
 });
@@ -243,14 +327,24 @@ ipcMain.on('desktop-fab:ready', () => {
 });
 
 ipcMain.handle('desktop-fab:click', () => {
-  focusMainForTeklif();
-  return { ok: true };
+  return openTeklifModalWindow();
 });
 
 ipcMain.handle('desktop-fab:setBusy', (_event, busy) => {
   fabBusy = !!busy;
   pushFabState();
   return { ok: true };
+});
+
+ipcMain.handle('teklif-modal:close', () => {
+  destroyTeklifModalWindow();
+  return { ok: true };
+});
+
+ipcMain.on('teklif-modal:created', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('history:changed');
+  }
 });
 
 ipcMain.handle('user:info', () => {

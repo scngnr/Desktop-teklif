@@ -808,8 +808,8 @@ window.teklifApp.onSessionChanged((payload) => {
   }
 });
 
-window.teklifApp.onOpenFromFab(() => {
-  requestCreateTeklif();
+window.teklifApp.onHistoryChanged(() => {
+  loadHistory();
 });
 
 restoreSidebarState();

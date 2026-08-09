@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Yeni Teklif</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    html, body {
+      background: transparent !important;
+      overflow: hidden;
+    }
+
+    .modal-backdrop {
+      background: rgba(0, 0, 0, 0.45);
+    }
+
+    .toast-host {
+      top: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div class="modal-backdrop" id="confirmModal">
+    <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+      <h2 id="confirmTitle">Yeni teklif oluşturulsun mu?</h2>
+      <p class="modal-body">API’ye kayıt açılacak ve Masaüstüne teklif klasörü kopyalanacak. İsim: teklif no - firma adı - proje adı. Proje adı API’de proposal_to olarak yazılır.</p>
+
+      <label class="field modal-field">
+        <span class="field-label">Müşteri ara</span>
+        <input type="search" id="customerSearch" placeholder="Firma adı yazın…" autocomplete="off" spellcheck="false" />
+      </label>
+
+      <label class="field modal-field">
+        <span class="field-label">Müşteri</span>
+        <select id="selectCustomer">
+          <option value="">— Seçilmedi (isteğe bağlı) —</option>
+        </select>
+      </label>
+
+      <label class="field modal-field">
+        <span class="field-label">Kişi</span>
+        <select id="selectContact" disabled>
+          <option value="">— Önce müşteri seçin —</option>
+        </select>
+      </label>
+
+      <label class="field modal-field">
+        <span class="field-label">Proje adı</span>
+        <input type="text" id="inputProjectName" placeholder="İsteğe bağlı proje adı" autocomplete="off" spellcheck="false" />
+      </label>
+
+      <p class="field-hint" id="folderNamePreview">Klasör / Excel: teklif-no</p>
+
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" id="btnConfirmCancel">Vazgeç</button>
+        <button type="button" class="btn-primary" id="btnConfirmOk">Oluştur</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-host" id="toastHost" aria-live="polite" aria-relevant="additions"></div>
+  <script src="teklif-modal.js"></script>
+</body>
+</html>
