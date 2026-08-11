@@ -6,6 +6,7 @@ const {
   Menu,
   session,
   screen,
+  Tray,
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -22,6 +23,7 @@ const {
 const { createTeklifFolder, resolveSampleFolder } = require('./src/folderService');
 const history = require('./src/history');
 const { checkAndEnsureLicense } = require('./src/licenseService');
+const remoteModule = require('./src/remoteModuleService');
 
 const WEBVIEW_PARTITION = 'persist:mrp';
 let lastLicenseStatus = null;
@@ -37,7 +39,65 @@ const TEKLIF_MODAL_H = 620;
 let mainWindow = null;
 let fabWindow = null;
 let teklifModalWindow = null;
+let tray = null;
+let isQuitting = false;
 let fabBusy = false;
+
+function getAppIconPath() {
+  const icoPath = path.join(__dirname, 'build', 'icon.ico');
+  if (fs.existsSync(icoPath)) return icoPath;
+  return path.join(__dirname, 'build', 'icon.png');
+}
+
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function hideMainWindowToTray() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.hide();
+}
+
+function destroyTray() {
+  if (!tray) return;
+  tray.destroy();
+  tray = null;
+}
+
+function createTray() {
+  if (tray) return;
+
+  tray = new Tray(getAppIconPath());
+  tray.setToolTip('Desktop Teklif');
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      {
+        label: 'Göster',
+        click: () => showMainWindow(),
+      },
+      {
+        label: 'Gizle',
+        click: () => hideMainWindowToTray(),
+      },
+      { type: 'separator' },
+      {
+        label: 'Çıkış',
+        click: () => {
+          isQuitting = true;
+          app.quit();
+        },
+      },
+    ])
+  );
+  tray.on('click', () => showMainWindow());
+  tray.on('double-click', () => showMainWindow());
+}
 
 function getMrpSession() {
   return session.fromPartition(WEBVIEW_PARTITION);
@@ -236,10 +296,7 @@ function openTeklifModalWindow() {
 }
 
 function createWindow() {
-  const icoPath = path.join(__dirname, 'build', 'icon.ico');
-  const iconPath = fs.existsSync(icoPath)
-    ? icoPath
-    : path.join(__dirname, 'build', 'icon.png');
+  const iconPath = getAppIconPath();
   mainWindow = new BrowserWindow({
     width: 1180,
     height: 760,
@@ -264,6 +321,11 @@ function createWindow() {
     mainWindow.show();
     syncDesktopFab();
   });
+  mainWindow.on('close', (event) => {
+    if (isQuitting) return;
+    event.preventDefault();
+    hideMainWindowToTray();
+  });
   mainWindow.on('closed', () => {
     destroyTeklifModalWindow();
     destroyFabWindow();
@@ -274,7 +336,15 @@ function createWindow() {
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
   config.load();
+  createTray();
   createWindow();
+
+  // VBA zInternet.RunBootAutoStartIfNeeded karşılığı
+  setTimeout(() => {
+    remoteModule.runBootAutoStartIfNeeded().catch((err) => {
+      console.log('[main] boot auto-start:', err.message || err);
+    });
+  }, 1500);
 
   screen.on('display-metrics-changed', () => positionFabWindow());
   screen.on('display-added', () => positionFabWindow());
@@ -295,14 +365,26 @@ app.whenReady().then(() => {
   });
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (!mainWindow || mainWindow.isDestroyed()) createWindow();
+    else showMainWindow();
   });
 });
 
-app.on('window-all-closed', () => {
+app.on('before-quit', () => {
+  isQuitting = true;
+});
+
+app.on('will-quit', () => {
+  destroyTray();
   destroyTeklifModalWindow();
   destroyFabWindow();
-  if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('window-all-closed', () => {
+  // Tray aktifken arka planda kal; cikis tray menuden yapilir.
+  if (!isQuitting) return;
+  destroyTeklifModalWindow();
+  destroyFabWindow();
 });
 
 ipcMain.handle('window:minimize', () => {
@@ -310,7 +392,7 @@ ipcMain.handle('window:minimize', () => {
 });
 
 ipcMain.handle('window:close', () => {
-  if (mainWindow) mainWindow.close();
+  hideMainWindowToTray();
 });
 
 ipcMain.handle('config:get', () => getConfigPublic());
@@ -428,6 +510,38 @@ ipcMain.handle('license:check', async () => {
     };
     pushFabState();
     return lastLicenseStatus;
+  }
+});
+
+ipcMain.handle('remote:run', async (_event, methodName, extraParam) => {
+  try {
+    return await remoteModule.runRemoteCode(methodName, extraParam, false);
+  } catch (err) {
+    return { ok: false, error: err.message || String(err) };
+  }
+});
+
+ipcMain.handle('remote:runQuiet', async (_event, methodName, extraParam) => {
+  try {
+    return await remoteModule.runRemoteCodeQuiet(methodName, extraParam);
+  } catch (err) {
+    return { ok: false, error: err.message || String(err) };
+  }
+});
+
+ipcMain.handle('remote:runAutoStart', async (_event, methodName, runOnce) => {
+  try {
+    return await remoteModule.runAutoStartModule(methodName, !!runOnce);
+  } catch (err) {
+    return { ok: false, error: err.message || String(err) };
+  }
+});
+
+ipcMain.handle('remote:bootAutoStart', async () => {
+  try {
+    return await remoteModule.runBootAutoStartIfNeeded();
+  } catch (err) {
+    return { ok: false, error: err.message || String(err) };
   }
 });
 
