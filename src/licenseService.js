@@ -5,9 +5,22 @@ const config = require('./config');
 
 const execFileAsync = promisify(execFile);
 
-const LICENSE_BASE =
+const LICENSE_BASE_DEFAULT =
   'https://nextjs-teklif-sunucu.vercel.app/api';
 const APP_DOSYA_ADI = 'desktop-teklif';
+
+function getLicenseBase() {
+  try {
+    const fromConfig = String((config.get() && config.get().apiBaseUrl) || '').trim();
+    if (fromConfig) return fromConfig.replace(/\/+$/, '');
+  } catch {
+    // app henüz hazır değil olabilir
+  }
+  return LICENSE_BASE_DEFAULT;
+}
+
+/** Geriye dönük uyumluluk */
+const LICENSE_BASE = LICENSE_BASE_DEFAULT;
 
 function normalizeMac(mac) {
   return String(mac || '')
@@ -53,7 +66,8 @@ async function getMacAddress() {
 }
 
 async function licenseRequest(method, path, body) {
-  const url = `${LICENSE_BASE}${path.startsWith('/') ? path : `/${path}`}`;
+  const base = getLicenseBase();
+  const url = `${base}${path.startsWith('/') ? path : `/${path}`}`;
   const res = await fetch(url, {
     method,
     headers:
@@ -138,6 +152,7 @@ async function checkAndEnsureLicense(meta = {}) {
 
 module.exports = {
   LICENSE_BASE,
+  getLicenseBase,
   APP_DOSYA_ADI,
   getMacAddress,
   getLicense,

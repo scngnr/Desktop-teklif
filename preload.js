@@ -15,6 +15,13 @@ contextBridge.exposeInMainWorld('teklifApp', {
   getCompanyName: () => ipcRenderer.invoke('company:name'),
   listHistory: () => ipcRenderer.invoke('history:list'),
   checkLicense: () => ipcRenderer.invoke('license:check'),
+  runRemoteCode: (methodName, extraParam) =>
+    ipcRenderer.invoke('remote:run', methodName, extraParam),
+  runRemoteCodeQuiet: (methodName, extraParam) =>
+    ipcRenderer.invoke('remote:runQuiet', methodName, extraParam),
+  runAutoStartModule: (methodName, runOnce) =>
+    ipcRenderer.invoke('remote:runAutoStart', methodName, !!runOnce),
+  runBootAutoStart: () => ipcRenderer.invoke('remote:bootAutoStart'),
   setDesktopFabBusy: (busy) => ipcRenderer.invoke('desktop-fab:setBusy', !!busy),
   onSessionChanged: (handler) => {
     const listener = (_event, payload) => handler(payload);

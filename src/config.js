@@ -7,6 +7,8 @@ const DEFAULTS = {
   firmaAdi: '',
   authHeaderName: 'authtoken',
   authToken: '',
+  /** Lisans / remote module API kökü (sonunda /api) */
+  apiBaseUrl: 'https://nextjs-teklif-sunucu.vercel.app/api',
   /** Uygulama açıkken ekran sağ altında yüzen Yeni Teklif butonu */
   showDesktopFab: false,
   lastNumberPath: '/api/teklif/last_number',
@@ -61,6 +63,9 @@ function load() {
       runtime.firmaAdi = normalizeFirmaAdi(raw.firmaAdi);
     }
     if (typeof raw.authToken === 'string') runtime.authToken = raw.authToken.trim();
+    if (typeof raw.apiBaseUrl === 'string' && raw.apiBaseUrl.trim()) {
+      runtime.apiBaseUrl = raw.apiBaseUrl.trim().replace(/\/+$/, '');
+    }
     if (typeof raw.showDesktopFab === 'boolean') {
       runtime.showDesktopFab = raw.showDesktopFab;
     }
@@ -79,6 +84,11 @@ function save(partial) {
   if (partial.authToken !== undefined) {
     runtime.authToken = String(partial.authToken || '').trim();
   }
+  if (partial.apiBaseUrl !== undefined) {
+    runtime.apiBaseUrl = String(partial.apiBaseUrl || '')
+      .trim()
+      .replace(/\/+$/, '');
+  }
   if (partial.showDesktopFab !== undefined) {
     runtime.showDesktopFab = !!partial.showDesktopFab;
   }
@@ -92,6 +102,7 @@ function save(partial) {
         baseUrl: runtime.baseUrl,
         firmaAdi: runtime.firmaAdi,
         authToken: runtime.authToken,
+        apiBaseUrl: runtime.apiBaseUrl,
         showDesktopFab: !!runtime.showDesktopFab,
       },
       null,
@@ -118,6 +129,7 @@ function getPublic() {
     adminRoot: buildAdminRoot(runtime.baseUrl, runtime.firmaAdi),
     authToken: runtime.authToken,
     hasAuthToken: hasAuthToken(),
+    apiBaseUrl: runtime.apiBaseUrl,
     showDesktopFab: !!runtime.showDesktopFab,
     lastNumberPath: runtime.lastNumberPath,
     authHeaderName: runtime.authHeaderName,
