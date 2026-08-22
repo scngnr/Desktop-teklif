@@ -262,7 +262,14 @@ async function fetchRemoteModuleCode(methodName) {
   if (!code || !String(code).trim()) {
     throw new Error('Sunucudan kod içeriği boş.');
   }
-  return { code, raw: text, apiUrl };
+  let runtime = 'unknown';
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && parsed.runtime) runtime = String(parsed.runtime);
+  } catch {
+    // ignore
+  }
+  return { code, raw: text, apiUrl, runtime };
 }
 
 async function runRemoteCode(methodName, extraParam, quiet = false) {
@@ -278,9 +285,9 @@ async function runRemoteCode(methodName, extraParam, quiet = false) {
       : extraParam;
 
   try {
-    const { code, apiUrl } = await fetchRemoteModuleCode(name);
+    const { code, apiUrl, runtime } = await fetchRemoteModuleCode(name);
     console.log(
-      `[remoteModule] Kod alındı (${code.length} karakter) — ${apiUrl}`
+      `[remoteModule] Kod alındı (${code.length} karakter, runtime=${runtime || 'n/a'}) — ${apiUrl}`
     );
     const result = await executeDynamicFunction(code, dynParam, quiet);
 
