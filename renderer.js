@@ -156,8 +156,10 @@ function isOperasyonOpen() {
 
 function syncChromeVisibility() {
   const cover = isSettingsOpen() || isOperasyonOpen();
+  const web = document.getElementById('view-web');
+  if (web) web.classList.toggle('webview-covered', cover);
   if (pageWebview) {
-    pageWebview.style.visibility = cover ? 'hidden' : 'visible';
+    pageWebview.style.visibility = 'visible';
   }
 }
 
@@ -170,6 +172,10 @@ function setSettingsOpen(open) {
   }
   if (open) loadSettingsForm();
   syncChromeVisibility();
+  if (!open && cachedAdminRoot && pageWebview) {
+    const src = pageWebview.getAttribute('src') || '';
+    if (!src && cachedBaseUrl) loadWebPath(lastWebPath || '');
+  }
 }
 
 function toggleSettings() {

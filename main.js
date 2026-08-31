@@ -229,7 +229,6 @@ function showFabWindow() {
 
 function createFabWindow() {
   if (fabWindow && !fabWindow.isDestroyed()) {
-    showFabWindow();
     return;
   }
 
@@ -246,7 +245,7 @@ function createFabWindow() {
   fabWindow.loadFile('fab.html');
   fabWindow.once('ready-to-show', () => {
     if (!fabWindow || fabWindow.isDestroyed()) return;
-    showFabWindow();
+    syncDesktopFab();
   });
   fabWindow.on('show', () => {
     if (!fabWindow || fabWindow.isDestroyed()) return;
@@ -258,10 +257,38 @@ function createFabWindow() {
   });
 }
 
+function fabOverlapsMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  if (!mainWindow.isVisible() || mainWindow.isMinimized()) return false;
+  const m = mainWindow.getBounds();
+  const display = screen.getPrimaryDisplay();
+  const f = floatingWindow.cornerBounds(
+    display.workArea,
+    FAB_W,
+    FAB_H,
+    FAB_MARGIN
+  );
+  return !(
+    f.x + f.width <= m.x ||
+    f.x >= m.x + m.width ||
+    f.y + f.height <= m.y ||
+    f.y >= m.y + m.height
+  );
+}
+
 function syncDesktopFab() {
   const enabled = !!config.getPublic().showDesktopFab;
-  if (enabled) createFabWindow();
-  else destroyFabWindow();
+  if (!enabled) {
+    destroyFabWindow();
+    return;
+  }
+  createFabWindow();
+  if (!fabWindow || fabWindow.isDestroyed()) return;
+  if (fabOverlapsMainWindow()) {
+    fabWindow.hide();
+  } else {
+    showFabWindow();
+  }
 }
 
 function destroyTeklifModalWindow() {
@@ -316,9 +343,7 @@ function openTeklifModalWindow() {
   teklifModalWindow.on('closed', () => {
     teklifModalWindow = null;
     pushFabState();
-    if (fabWindow && !fabWindow.isDestroyed() && config.getPublic().showDesktopFab) {
-      showFabWindow();
-    }
+    syncDesktopFab();
   });
 
   if (fabWindow && !fabWindow.isDestroyed()) {
@@ -350,16 +375,24 @@ function createWindow() {
 
   mainWindow.setMenuBarVisibility(false);
   mainWindow.webContents.on('will-attach-webview', (_event, webPreferences, params) => {
-    params.useragent = desktopIdentity.withUaToken(
-      params.useragent || getMrpSession().getUserAgent()
-    );
-    webPreferences.preload = path.join(__dirname, 'preload-webview.js');
+    try {
+      params.useragent = desktopIdentity.withUaToken(
+        params.useragent || getMrpSession().getUserAgent()
+      );
+    } catch (err) {
+      console.log('[main] will-attach-webview:', err.message || err);
+    }
   });
   mainWindow.loadFile('index.html');
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
     syncDesktopFab();
   });
+  ['move', 'resize', 'show', 'hide', 'minimize', 'restore', 'maximize', 'unmaximize'].forEach(
+    (ev) => {
+      mainWindow.on(ev, () => syncDesktopFab());
+    }
+  );
   mainWindow.on('close', (event) => {
     if (isQuitting) return;
     event.preventDefault();
