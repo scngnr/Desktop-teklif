@@ -181,61 +181,14 @@ button, input {
   font-size: 1.05rem;
 }
 
-/* Panel / webview: sidebar tamamen kapalı */
+/* Panel / webview: native sol menü yok — Perfex kenar çubuğu kullanılır */
 .layout.sidebar-hidden .sidebar {
   width: 0;
   padding: 0;
   border-right: none;
   opacity: 0;
+  overflow: hidden;
   pointer-events: none;
-}
-
-/* Sidebar gizliyken sağ alt yüzen Yeni Teklif */
-.fab-teklif {
-  position: fixed;
-  right: 22px;
-  bottom: 22px;
-  z-index: 9000;
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  padding: 14px 18px;
-  border: none;
-  border-radius: 999px;
-  background: var(--accent);
-  color: #fff;
-  font-family: inherit;
-  font-size: 0.92rem;
-  font-weight: 650;
-  cursor: pointer;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(31, 111, 235, 0.35);
-  transition: transform 0.15s ease, background 0.15s ease, opacity 0.15s ease;
-  -webkit-app-region: no-drag;
-  app-region: no-drag;
-}
-
-.fab-teklif[hidden] {
-  display: none !important;
-}
-
-.fab-teklif:hover:not(:disabled) {
-  background: var(--accent-hover);
-  transform: translateY(-2px);
-}
-
-.fab-teklif:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-  transform: none;
-}
-
-.fab-icon {
-  font-size: 1.05rem;
-  line-height: 1;
-}
-
-.fab-label {
-  letter-spacing: 0.01em;
 }
 
 .user-card {
@@ -867,4 +820,194 @@ button:disabled {
 .settings-actions {
   display: flex;
   gap: 10px;
+}
+
+.view-operasyon {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  padding: 20px 22px 16px;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.view-operasyon[hidden] {
+  display: none !important;
+}
+
+.ops-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.ops-header h1 {
+  font-size: 1.35rem;
+  font-weight: 650;
+}
+
+.ops-header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.ops-metrics {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.ops-metric {
+  flex: 1;
+  text-align: left;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.ops-metric span {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ops-metric strong {
+  font-size: 1.2rem;
+}
+
+.ops-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.ops-toolbar input {
+  flex: 1;
+  min-width: 160px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.ops-chips {
+  display: flex;
+  gap: 4px;
+}
+
+.ops-chips button {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 0.78rem;
+}
+
+.ops-chips button.active {
+  color: var(--text);
+  border-color: var(--accent);
+  background: rgba(31, 111, 235, 0.18);
+}
+
+.ops-table-wrap {
+  flex: 1;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.ops-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.ops-table th,
+.ops-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ops-table tbody tr {
+  cursor: pointer;
+}
+
+.ops-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.ops-empty {
+  color: var(--muted);
+  padding: 16px;
+}
+
+.ops-foot {
+  margin-top: 8px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.ops-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(31, 111, 235, 0.2);
+  font-size: 0.72rem;
+}
+
+.ops-detail {
+  flex: 1;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  background: var(--surface);
+}
+
+.ops-detail-actions {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.ops-detail-actions button {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.ops-messages .ops-msg {
+  border-top: 1px solid var(--border);
+  padding: 8px 0;
+}
+
+.ops-mini {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.ops-mini td,
+.ops-mini th {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
 }

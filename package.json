@@ -37,6 +37,7 @@
       "teklif-modal.js",
       "index.html",
       "renderer.js",
+      "operasyon.js",
       "styles.css",
       "src/**/*",
       "build/icon.png",

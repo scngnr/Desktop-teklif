@@ -104,12 +104,10 @@ function buildPerfexMenuInjectScript(payload) {
         '#' + MENU_ID + ' .dt-name{font-weight:650;font-size:13px;line-height:1.2;}',
         '#' + MENU_ID + ' .dt-role{font-size:11px;opacity:.75;margin-top:2px;}',
         '#' + MENU_ID + ' .dt-section{margin:10px 2px 4px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;opacity:.7;}',
-        '#' + MENU_ID + ' a.dt-link,#dt-teklif-btn{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;color:#e8eef6;text-decoration:none;font-size:13px;}',
+        '#' + MENU_ID + ' a.dt-link{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;color:#e8eef6;text-decoration:none;font-size:13px;}',
         '#' + MENU_ID + ' a.dt-link:hover{background:rgba(255,255,255,.06);}',
         '#' + MENU_ID + ' a.dt-warn{color:#f85149;}',
         '#' + MENU_ID + ' a.dt-ok{color:#3fb950;}',
-        '#dt-teklif-btn{background:#1f6feb;border:none;width:100%;justify-content:center;font-weight:650;cursor:pointer;color:#fff;}',
-        '#dt-teklif-btn[disabled]{opacity:.55;cursor:not-allowed;}',
         '#' + MENU_ID + ' .dt-empty{font-size:12px;opacity:.65;padding:4px 10px;}',
       ].join('');
       document.head.appendChild(style);
@@ -160,9 +158,6 @@ function buildPerfexMenuInjectScript(payload) {
         )).join('')
         : '<p class="dt-empty">Henüz teklif yok</p>';
 
-      const btnLabel = payload.createBusy ? 'Oluşturuluyor…' : 'Yeni Teklif';
-      const disabled = payload.canCreate ? '' : ' disabled';
-
       root.innerHTML =
         '<div class="dt-card">' +
           '<div class="dt-user">' +
@@ -171,7 +166,6 @@ function buildPerfexMenuInjectScript(payload) {
             '<div class="dt-role">' + esc(payload.userRole || '') + '</div></div>' +
           '</div>' +
           (payload.licenseLabel ? '<div class="dt-role">' + esc(payload.licenseLabel) + '</div>' : '') +
-          '<button type="button" id="dt-teklif-btn" data-desktop-action="yeni-teklif"' + disabled + '>' + esc(btnLabel) + '</button>' +
           '<p class="dt-section">Yapılacaklar</p>' +
           (tasksHtml || '<p class="dt-empty">Bekleyen işlem yok</p>') +
           '<p class="dt-section">Son teklifler</p>' +
@@ -212,7 +206,8 @@ if (require.main === module) {
     script.includes('menu-item-dt-ayarlar') &&
     !script.includes('>Ayarlar<') &&
     script.includes('Yapılacaklar') &&
-    script.includes('Yeni Teklif');
+    !script.includes('id="dt-teklif-btn"') &&
+    !script.includes('>Yeni Teklif<');
   if (!ok) {
     console.error('FAIL inject script markers');
     process.exit(1);

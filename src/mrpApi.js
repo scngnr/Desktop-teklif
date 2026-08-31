@@ -342,5 +342,6 @@ module.exports = {
   createTeklifRecord,
   fetchCompanyName,
   decodeTokenOwner,
+  apiRequest,
   getConfigPublic: () => config.getPublic(),
 };

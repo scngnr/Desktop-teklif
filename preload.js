@@ -24,9 +24,16 @@ contextBridge.exposeInMainWorld('teklifApp', {
   runBootAutoStart: () => ipcRenderer.invoke('remote:bootAutoStart'),
   setDesktopFabBusy: (busy) => ipcRenderer.invoke('desktop-fab:setBusy', !!busy),
   parseDesktopAction: (url) => ipcRenderer.sendSync('desktop:parseAction', url),
+  apiRequest: (method, path, body) =>
+    ipcRenderer.invoke('api:request', { method, path, body }),
   webviewPreloadPath: () => ipcRenderer.sendSync('app:webviewPreload'),
   buildPerfexMenuInject: (payload) =>
     ipcRenderer.sendSync('desktop:perfexInject', payload),
+  onDesktopAction: (handler) => {
+    const listener = (_event, action) => handler(action);
+    ipcRenderer.on('desktop:action', listener);
+    return () => ipcRenderer.removeListener('desktop:action', listener);
+  },
   onSessionChanged: (handler) => {
     const listener = (_event, payload) => handler(payload);
     ipcRenderer.on('session:changed', listener);

@@ -4,7 +4,6 @@ const btnTitleAyarlar = document.getElementById('btnTitleAyarlar');
 const layout = document.getElementById('layout');
 const content = document.getElementById('content');
 const btnCreateTeklif = document.getElementById('btnCreateTeklif');
-const btnCreateTeklifFab = document.getElementById('btnCreateTeklifFab');
 const toastHost = document.getElementById('toastHost');
 const settingsForm = document.getElementById('settingsForm');
 const inputBaseUrl = document.getElementById('inputBaseUrl');
@@ -55,6 +54,7 @@ let customersLoading = false;
 let licenseOk = false;
 let lastLicense = null;
 let previewTeklifNo = 'teklif-no';
+let lastWebPath = '';
 
 function showToast(message, kind = 'info', durationMs = 4200, action = null) {
   const text = String(message || '').trim();
@@ -100,6 +100,8 @@ function showToast(message, kind = 'info', durationMs = 4200, action = null) {
 
   toastTimer = setTimeout(() => hideToast(el), durationMs);
 }
+
+window.showToast = showToast;
 
 function hideToast(el) {
   if (!el || !el.parentNode) return;
@@ -147,6 +149,18 @@ function isSettingsOpen() {
   return !document.getElementById('view-ayarlar').hidden;
 }
 
+function isOperasyonOpen() {
+  const panel = document.getElementById('view-operasyon');
+  return !!(panel && !panel.hidden);
+}
+
+function syncChromeVisibility() {
+  const cover = isSettingsOpen() || isOperasyonOpen();
+  if (pageWebview) {
+    pageWebview.style.visibility = cover ? 'hidden' : 'visible';
+  }
+}
+
 function setSettingsOpen(open) {
   const panel = document.getElementById('view-ayarlar');
   panel.hidden = !open;
@@ -155,7 +169,7 @@ function setSettingsOpen(open) {
     btnTitleAyarlar.setAttribute('aria-pressed', open ? 'true' : 'false');
   }
   if (open) loadSettingsForm();
-  syncFabVisibility();
+  syncChromeVisibility();
 }
 
 function toggleSettings() {
@@ -168,24 +182,21 @@ function canCreateTeklif() {
 
 function syncCreateButtonsEnabled() {
   const enabled = canCreateTeklif();
-  btnCreateTeklif.disabled = !enabled;
-  btnCreateTeklifFab.disabled = !enabled;
-  const title = !cachedHasAuth
-    ? 'Önce Ayarlar’dan JWT girin'
-    : !licenseOk
-      ? 'Lisans aktif değil'
-      : 'Yeni Teklif Oluştur';
-  btnCreateTeklif.title = title;
-  btnCreateTeklifFab.title = title;
+  if (btnCreateTeklif) {
+    btnCreateTeklif.disabled = !enabled;
+    btnCreateTeklif.title = !cachedHasAuth
+      ? 'Önce Ayarlar’dan JWT girin'
+      : !licenseOk
+        ? 'Lisans aktif değil'
+        : 'Yeni Teklif Oluştur';
+  }
 }
 
 function setCreateBusy(busy) {
   creatingTeklif = busy;
   const label = busy ? CREATE_BUSY_LABEL : CREATE_LABEL;
-  const navLabel = btnCreateTeklif.querySelector('.nav-label');
-  const fabLabel = btnCreateTeklifFab.querySelector('.fab-label');
+  const navLabel = btnCreateTeklif && btnCreateTeklif.querySelector('.nav-label');
   if (navLabel) navLabel.textContent = label;
-  if (fabLabel) fabLabel.textContent = label;
   syncCreateButtonsEnabled();
   if (window.teklifApp.setDesktopFabBusy) {
     window.teklifApp.setDesktopFabBusy(busy);
@@ -240,17 +251,12 @@ async function refreshLicense() {
   }
 }
 
-function syncFabVisibility() {
-  btnCreateTeklifFab.hidden = isSettingsOpen();
-}
-
 function setSidebarHidden(hidden) {
   layout.classList.toggle('sidebar-hidden', hidden);
   layout.classList.add('native-nav-off');
   if (hidden) {
     layout.classList.remove('sidebar-collapsed');
   }
-  syncFabVisibility();
 }
 
 function restoreSidebarState() {
@@ -600,6 +606,12 @@ function getCreatePayload() {
 
 async function showView(viewId, options = {}) {
   const { path, navBtn } = options;
+  const opsView = document.getElementById('view-operasyon');
+
+  if (viewId !== 'operasyon' && window.OperasyonView) {
+    window.OperasyonView.hide();
+    if (opsView) opsView.hidden = true;
+  }
 
   if (viewId === 'ayarlar') {
     content.classList.add('content-web');
@@ -612,6 +624,7 @@ async function showView(viewId, options = {}) {
   document.getElementById('view-web').hidden = false;
   content.classList.add('content-web');
   setSettingsOpen(false);
+  setSidebarHidden(true);
 
   if (navBtn) {
     setActiveNav(navBtn);
@@ -629,6 +642,25 @@ async function showView(viewId, options = {}) {
     });
   }
 
+  if (viewId === 'operasyon') {
+    await refreshConfigCache();
+    if (!cachedHasAuth) {
+      showToast('Operasyon için JWT gerekli. Ayarlar’dan token girin.', 'err');
+      await showView('ayarlar');
+      return;
+    }
+    if (opsView) opsView.hidden = false;
+    if (window.OperasyonView) {
+      window.OperasyonView.openWebPath = (webPath) => {
+        showView('web', { path: webPath });
+      };
+      window.OperasyonView.onNeedSettings(() => showView('ayarlar'));
+      await window.OperasyonView.show();
+    }
+    syncChromeVisibility();
+    return;
+  }
+
   if (viewId === 'web') {
     await refreshConfigCache();
     if (!cachedBaseUrl) {
@@ -639,6 +671,7 @@ async function showView(viewId, options = {}) {
     loadWebPath(path !== undefined ? path : lastWebPath);
     await refreshLoginState();
   }
+  syncChromeVisibility();
 }
 
 async function createTeklifAction(payload = {}) {
@@ -724,7 +757,7 @@ function collectDesktopTasks() {
   if (cachedHasAuth && licenseOk) {
     tasks.push({
       label: 'Yeni teklif oluşturabilirsiniz',
-      action: 'yeni-teklif',
+      action: 'yeni',
       tone: 'ok',
     });
   }
@@ -764,7 +797,7 @@ function handleDesktopMenuAction(raw, extra) {
     (window.teklifApp.parseDesktopAction &&
       window.teklifApp.parseDesktopAction(raw)) ||
     raw;
-  if (action === 'yeni-teklif') {
+  if (action === 'yeni-teklif' || action === 'yeni') {
     requestCreateTeklif();
     return true;
   }
@@ -778,8 +811,7 @@ function handleDesktopMenuAction(raw, extra) {
     return true;
   }
   if (action === 'operasyon') {
-    setSettingsOpen(false);
-    injectPerfexDesktopMenu();
+    showView('operasyon');
     return true;
   }
   return false;
@@ -805,10 +837,15 @@ function requestCreateTeklif() {
 btnMinimize.addEventListener('click', () => window.teklifApp.minimize());
 btnClose.addEventListener('click', () => window.teklifApp.close());
 
-btnTitleAyarlar.addEventListener('click', () => toggleSettings());
+btnTitleAyarlar.addEventListener('click', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  toggleSettings();
+});
 
-btnCreateTeklif.addEventListener('click', () => requestCreateTeklif());
-btnCreateTeklifFab.addEventListener('click', () => requestCreateTeklif());
+if (btnCreateTeklif) {
+  btnCreateTeklif.addEventListener('click', () => requestCreateTeklif());
+}
 
 btnConfirmCancel.addEventListener('click', () => closeConfirmModal());
 btnConfirmOk.addEventListener('click', () => {
@@ -845,6 +882,10 @@ document.addEventListener('keydown', (e) => {
   }
   if (e.key === 'Escape' && isSettingsOpen()) {
     setSettingsOpen(false);
+    return;
+  }
+  if (e.key === 'Escape' && isOperasyonOpen()) {
+    showView('web', { path: lastWebPath || '' });
   }
 });
 
@@ -968,6 +1009,12 @@ window.teklifApp.onSessionChanged((payload) => {
 window.teklifApp.onHistoryChanged(() => {
   loadHistory();
 });
+
+if (window.teklifApp.onDesktopAction) {
+  window.teklifApp.onDesktopAction((action) => {
+    handleDesktopMenuAction(action);
+  });
+}
 
 restoreSidebarState();
 layout.classList.add('native-nav-off');

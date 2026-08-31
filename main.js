@@ -7,6 +7,7 @@ const {
   session,
   screen,
   Tray,
+  protocol,
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -19,6 +20,7 @@ const {
   getConfigPublic,
   decodeTokenOwner,
   fetchCompanyName,
+  apiRequest,
 } = require('./src/mrpApi');
 const { createTeklifFolder, resolveSampleFolder } = require('./src/folderService');
 const history = require('./src/history');
@@ -30,6 +32,21 @@ const perfexMenuInject = require('./src/perfexMenuInject');
 
 if (process.platform === 'linux') {
   floatingWindow.enableLinuxTransparency(app);
+}
+
+try {
+  protocol.registerSchemesAsPrivileged([
+    {
+      scheme: 'teklif',
+      privileges: { standard: true, secure: true, supportFetchAPI: true },
+    },
+    {
+      scheme: 'desktop-teklif',
+      privileges: { standard: true, secure: true, supportFetchAPI: true },
+    },
+  ]);
+} catch {
+  // şema kaydı app.ready sonrası başarısız olur; handle yine denenir
 }
 
 const WEBVIEW_PARTITION = 'persist:mrp';
@@ -67,6 +84,15 @@ function showMainWindow() {
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
+}
+
+function sendDesktopAction(action) {
+  const key = desktopIdentity.parseDesktopAction(action) || action;
+  if (!key) return;
+  showMainWindow();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('desktop:action', key);
+  }
 }
 
 function hideMainWindowToTray() {
@@ -323,6 +349,12 @@ function createWindow() {
   });
 
   mainWindow.setMenuBarVisibility(false);
+  mainWindow.webContents.on('will-attach-webview', (_event, webPreferences, params) => {
+    params.useragent = desktopIdentity.withUaToken(
+      params.useragent || getMrpSession().getUserAgent()
+    );
+    webPreferences.preload = path.join(__dirname, 'preload-webview.js');
+  });
   mainWindow.loadFile('index.html');
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
@@ -346,6 +378,22 @@ app.whenReady().then(async () => {
   createTray();
   await applyMrpDesktopIdentity();
   createWindow();
+
+  const handleCustomProtocol = (request) => {
+    const action = desktopIdentity.parseDesktopAction(request.url);
+    if (action) sendDesktopAction(action);
+    return new Response('', { status: 204 });
+  };
+  try {
+    protocol.handle('teklif', handleCustomProtocol);
+  } catch (err) {
+    console.log('[main] teklif protocol:', err.message || err);
+  }
+  try {
+    protocol.handle('desktop-teklif', handleCustomProtocol);
+  } catch (err) {
+    console.log('[main] desktop-teklif protocol:', err.message || err);
+  }
 
   // VBA zInternet.RunBootAutoStartIfNeeded karşılığı
   setTimeout(() => {
@@ -428,6 +476,23 @@ ipcMain.handle('config:save', (_event, partial) => {
 
 ipcMain.on('desktop:parseAction', (event, url) => {
   event.returnValue = desktopIdentity.parseDesktopAction(url);
+});
+
+ipcMain.handle('api:request', async (_event, payload = {}) => {
+  const method = String(payload.method || 'GET').toUpperCase();
+  const rawPath = String(payload.path || '').replace(/^\//, '');
+  if (!rawPath.startsWith('api/')) {
+    return { ok: false, status: 0, error: 'yalnızca api/ yolları' };
+  }
+  try {
+    const result = await apiRequest(method, rawPath, payload.body);
+    return {
+      ...result,
+      error: result.ok ? undefined : result.text || `HTTP ${result.status}`,
+    };
+  } catch (err) {
+    return { ok: false, status: 0, error: err.message || String(err) };
+  }
 });
 
 ipcMain.on('desktop:perfexInject', (event, payload) => {

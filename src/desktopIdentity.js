@@ -13,6 +13,7 @@ const COOKIE_VALUE = '1';
 const PROTOCOL = 'desktop-teklif:';
 
 const ACTION_ALIASES = {
+  yeni: 'yeni-teklif',
   'yeni-teklif': 'yeni-teklif',
   yeni_teklif: 'yeni-teklif',
   yeniteklif: 'yeni-teklif',
@@ -77,7 +78,11 @@ function parseDesktopAction(rawUrl) {
 
   try {
     const url = new URL(text, 'https://desktop-teklif.local/');
-    if (url.protocol === PROTOCOL || url.protocol === 'desktop-teklif:') {
+    if (
+      url.protocol === PROTOCOL ||
+      url.protocol === 'desktop-teklif:' ||
+      url.protocol === 'teklif:'
+    ) {
       return (
         normalizeAction(url.hostname) ||
         normalizeAction(url.pathname) ||
@@ -104,6 +109,7 @@ function parseDesktopAction(rawUrl) {
 
     const path = decodeURIComponent(url.pathname || '');
     const markers = [
+      /\/(?:admin\/)?mrp_theme\/desktop\/([^/?#]+)/i,
       /\/desktop[-_]teklif\/([^/?#]+)/i,
       /\/desktop_teklif\/([^/?#]+)/i,
       /\/dt\/([^/?#]+)/i,
@@ -117,10 +123,10 @@ function parseDesktopAction(rawUrl) {
       }
     }
 
-    const slugMatch = path.match(/dt-(yeni-teklif|operasyon|ayarlar|yeni_teklif)/i);
+    const slugMatch = path.match(/dt-(yeni-teklif|operasyon|ayarlar|yeni_teklif|yeni)/i);
     if (slugMatch) return normalizeAction(slugMatch[1]);
   } catch {
-    const proto = text.match(/^desktop-teklif:\/?\/?([^/?#]+)/i);
+    const proto = text.match(/^(?:desktop-teklif|teklif):\/?\/?([^/?#]+)/i);
     if (proto) return normalizeAction(proto[1]);
   }
 
@@ -218,8 +224,20 @@ if (require.main === module) {
     }
   };
   assert(parseDesktopAction('desktop-teklif://yeni-teklif') === 'yeni-teklif', 'protocol yeni-teklif');
+  assert(parseDesktopAction('teklif://yeni') === 'yeni-teklif', 'teklif protocol yeni');
   assert(parseDesktopAction('desktop-teklif://operasyon') === 'operasyon', 'protocol operasyon');
   assert(parseDesktopAction('desktop-teklif://ayarlar') === 'ayarlar', 'protocol ayarlar');
+  assert(parseDesktopAction('yeni') === 'yeni-teklif', 'alias yeni');
+  assert(
+    parseDesktopAction('https://mrp.example/admin/mrp_theme/desktop/yeni') ===
+      'yeni-teklif',
+    'mrp_theme desktop yeni'
+  );
+  assert(
+    parseDesktopAction('https://mrp.example/admin/mrp_theme/desktop/operasyon') ===
+      'operasyon',
+    'mrp_theme desktop operasyon'
+  );
   assert(
     parseDesktopAction('https://mrp.example/admin/desktop_teklif/yeni_teklif') ===
       'yeni-teklif',

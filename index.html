@@ -106,6 +106,51 @@
           </div>
         </section>
 
+        <section class="view view-operasyon" id="view-operasyon" hidden>
+          <header class="ops-header">
+            <div>
+              <h1 id="opsTitle">Operasyon</h1>
+              <p class="subtitle" id="opsSubtitle">Üretim ve teklif operasyonları</p>
+            </div>
+            <div class="ops-header-actions">
+              <button type="button" class="btn-secondary" id="opsBtnBack" hidden>Liste</button>
+              <button type="button" class="btn-primary" id="opsBtnRefresh">Yenile</button>
+            </div>
+          </header>
+          <div class="ops-metrics" id="opsMetrics"></div>
+          <div id="opsListPane">
+            <div class="ops-toolbar">
+              <input type="search" id="opsSearch" placeholder="Ara…" autocomplete="off" spellcheck="false" />
+              <div class="ops-chips" id="opsStatusChips">
+                <button type="button" data-value="open" class="active">Açık</button>
+                <button type="button" data-value="accepted">Kabul</button>
+                <button type="button" data-value="all">Tümü</button>
+              </div>
+              <div class="ops-chips" id="opsScopeChips">
+                <button type="button" data-value="outstanding" class="active">Bekleyen</button>
+                <button type="button" data-value="ids">Yerel teklifler</button>
+              </div>
+            </div>
+            <div class="ops-table-wrap">
+              <table class="ops-table" id="opsTable">
+                <thead>
+                  <tr>
+                    <th>No</th>
+                    <th>Müşteri / konu</th>
+                    <th>Durum</th>
+                    <th>Tarih</th>
+                  </tr>
+                </thead>
+                <tbody id="opsTableBody">
+                  <tr><td colspan="4" class="ops-empty">Yükleniyor…</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="ops-foot" id="opsListFoot"></p>
+          </div>
+          <div id="opsDetailPane" class="ops-detail" hidden></div>
+        </section>
+
         <section class="view view-web" id="view-web">
           <webview
             id="pageWebview"
@@ -119,11 +164,6 @@
       </main>
     </div>
   </div>
-
-  <button type="button" class="fab-teklif" id="btnCreateTeklifFab" title="Yeni Teklif Oluştur" hidden disabled>
-    <span class="fab-icon" aria-hidden="true">◇</span>
-    <span class="fab-label">Yeni Teklif</span>
-  </button>
 
   <div class="modal-backdrop" id="confirmModal" hidden>
     <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
@@ -164,6 +204,7 @@
   </div>
 
   <div class="toast-host" id="toastHost" aria-live="polite" aria-relevant="additions"></div>
+  <script src="operasyon.js"></script>
   <script src="renderer.js"></script>
 </body>
 </html>

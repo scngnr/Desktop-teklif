@@ -17,9 +17,9 @@ function sendNavigate(href) {
 const api = {
   isDesktop: true,
   uaToken: 'DesktopTeklif/1',
-  yeniTeklif: () => sendAction('yeni-teklif'),
+  yeniTeklif: () => sendAction('yeni'),
   operasyon: () => sendAction('operasyon'),
-  openSettings: () => sendAction('open-settings'),
+  openSettings: () => sendAction('ayarlar'),
   action: sendAction,
 };
 
@@ -33,11 +33,13 @@ function hrefLooksDesktop(href) {
   const h = String(href || '');
   if (!h) return false;
   if (/^desktop-teklif:/i.test(h)) return true;
+  if (/^teklif:/i.test(h)) return true;
   if (/desktop[-_]?action=/i.test(h)) return true;
   if (/[?&#]dt=/i.test(h)) return true;
+  if (/\/(?:admin\/)?mrp_theme\/desktop\//i.test(h)) return true;
   if (/\/desktop[-_]teklif\//i.test(h)) return true;
   if (/\/dt\/(yeni|operasyon|ayarlar)/i.test(h)) return true;
-  if (/dt-(yeni-teklif|operasyon|ayarlar)/i.test(h)) return true;
+  if (/dt-(yeni-teklif|operasyon|ayarlar|yeni)/i.test(h)) return true;
   return false;
 }
 
