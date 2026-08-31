@@ -24,6 +24,12 @@ const { createTeklifFolder, resolveSampleFolder } = require('./src/folderService
 const history = require('./src/history');
 const { checkAndEnsureLicense } = require('./src/licenseService');
 const remoteModule = require('./src/remoteModuleService');
+const desktopIdentity = require('./src/desktopIdentity');
+const floatingWindow = require('./src/floatingWindow');
+
+if (process.platform === 'linux') {
+  floatingWindow.enableLinuxTransparency(app);
+}
 
 const WEBVIEW_PARTITION = 'persist:mrp';
 let lastLicenseStatus = null;
@@ -44,9 +50,12 @@ let isQuitting = false;
 let fabBusy = false;
 
 function getAppIconPath() {
+  const pngPath = path.join(__dirname, 'build', 'icon.png');
   const icoPath = path.join(__dirname, 'build', 'icon.ico');
+  if (process.platform === 'win32' && fs.existsSync(icoPath)) return icoPath;
+  if (fs.existsSync(pngPath)) return pngPath;
   if (fs.existsSync(icoPath)) return icoPath;
-  return path.join(__dirname, 'build', 'icon.png');
+  return undefined;
 }
 
 function showMainWindow() {
@@ -72,8 +81,15 @@ function destroyTray() {
 
 function createTray() {
   if (tray) return;
+  const iconPath = getAppIconPath();
+  if (!iconPath) return;
 
-  tray = new Tray(getAppIconPath());
+  try {
+    tray = new Tray(iconPath);
+  } catch (err) {
+    console.log('[main] tray ikonu yüklenemedi:', err.message || err);
+    return;
+  }
   tray.setToolTip('Desktop Teklif');
   tray.setContextMenu(
     Menu.buildFromTemplate([
@@ -103,6 +119,21 @@ function getMrpSession() {
   return session.fromPartition(WEBVIEW_PARTITION);
 }
 
+function mrpIdentityUrls() {
+  const cfg = config.getPublic();
+  return [cfg.baseUrl, cfg.adminRoot].filter(Boolean);
+}
+
+async function applyMrpDesktopIdentity() {
+  const ses = getMrpSession();
+  desktopIdentity.attachUserAgentRewrite(ses);
+  try {
+    await desktopIdentity.applyDesktopIdentity(ses, mrpIdentityUrls());
+  } catch (err) {
+    console.log('[main] desktop identity:', err.message || err);
+  }
+}
+
 async function isWebLoggedIn() {
   const cfg = config.getPublic();
   const urls = [cfg.baseUrl, cfg.adminRoot].filter(Boolean);
@@ -130,10 +161,13 @@ async function isWebLoggedIn() {
 function positionFabWindow() {
   if (!fabWindow || fabWindow.isDestroyed()) return;
   const display = screen.getPrimaryDisplay();
-  const area = display.workArea;
-  const x = Math.round(area.x + area.width - FAB_W - FAB_MARGIN);
-  const y = Math.round(area.y + area.height - FAB_H - FAB_MARGIN);
-  fabWindow.setBounds({ x, y, width: FAB_W, height: FAB_H });
+  const bounds = floatingWindow.cornerBounds(
+    display.workArea,
+    FAB_W,
+    FAB_H,
+    FAB_MARGIN
+  );
+  fabWindow.setBounds(bounds);
 }
 
 function canUseDesktopFab() {
@@ -159,44 +193,38 @@ function destroyFabWindow() {
   fabWindow = null;
 }
 
+function showFabWindow() {
+  if (!fabWindow || fabWindow.isDestroyed()) return;
+  positionFabWindow();
+  floatingWindow.showOverlay(fabWindow, { stealFocus: false });
+  pushFabState();
+}
+
 function createFabWindow() {
   if (fabWindow && !fabWindow.isDestroyed()) {
-    positionFabWindow();
-    pushFabState();
-    if (!fabWindow.isVisible()) fabWindow.showInactive();
+    showFabWindow();
     return;
   }
 
-  fabWindow = new BrowserWindow({
-    width: FAB_W,
-    height: FAB_H,
-    frame: false,
-    transparent: true,
-    resizable: false,
-    maximizable: false,
-    minimizable: false,
-    fullscreenable: false,
-    skipTaskbar: true,
-    alwaysOnTop: true,
-    hasShadow: false,
-    show: false,
-    focusable: true,
-    backgroundColor: '#00000000',
-    webPreferences: {
+  fabWindow = new BrowserWindow(
+    floatingWindow.overlayBrowserOptions({
+      width: FAB_W,
+      height: FAB_H,
       preload: path.join(__dirname, 'preload-fab.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-  });
+    })
+  );
 
-  fabWindow.setAlwaysOnTop(true, 'screen-saver');
-  fabWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  floatingWindow.applyFloatingBehavior(fabWindow);
   positionFabWindow();
   fabWindow.loadFile('fab.html');
   fabWindow.once('ready-to-show', () => {
     if (!fabWindow || fabWindow.isDestroyed()) return;
-    fabWindow.showInactive();
-    pushFabState();
+    showFabWindow();
+  });
+  fabWindow.on('show', () => {
+    if (!fabWindow || fabWindow.isDestroyed()) return;
+    floatingWindow.applyFloatingBehavior(fabWindow);
+    positionFabWindow();
   });
   fabWindow.on('closed', () => {
     fabWindow = null;
@@ -221,21 +249,17 @@ function destroyTeklifModalWindow() {
 function positionTeklifModalWindow() {
   if (!teklifModalWindow || teklifModalWindow.isDestroyed()) return;
   const display = screen.getPrimaryDisplay();
-  const area = display.workArea;
-  const x = Math.round(area.x + (area.width - TEKLIF_MODAL_W) / 2);
-  const y = Math.round(area.y + (area.height - TEKLIF_MODAL_H) / 2);
-  teklifModalWindow.setBounds({
-    x,
-    y,
-    width: TEKLIF_MODAL_W,
-    height: TEKLIF_MODAL_H,
-  });
+  const bounds = floatingWindow.centerBounds(
+    display.workArea,
+    TEKLIF_MODAL_W,
+    TEKLIF_MODAL_H
+  );
+  teklifModalWindow.setBounds(bounds);
 }
 
 function openTeklifModalWindow() {
   if (teklifModalWindow && !teklifModalWindow.isDestroyed()) {
-    teklifModalWindow.show();
-    teklifModalWindow.focus();
+    floatingWindow.showOverlay(teklifModalWindow, { stealFocus: true });
     return { ok: true };
   }
 
@@ -247,44 +271,26 @@ function openTeklifModalWindow() {
     return { ok: false, error: 'JWT veya lisans eksik' };
   }
 
-  teklifModalWindow = new BrowserWindow({
-    width: TEKLIF_MODAL_W,
-    height: TEKLIF_MODAL_H,
-    frame: false,
-    transparent: true,
-    resizable: false,
-    maximizable: false,
-    minimizable: false,
-    fullscreenable: false,
-    skipTaskbar: true,
-    alwaysOnTop: true,
-    hasShadow: false,
-    show: false,
-    focusable: true,
-    backgroundColor: '#00000000',
-    webPreferences: {
+  teklifModalWindow = new BrowserWindow(
+    floatingWindow.overlayBrowserOptions({
+      width: TEKLIF_MODAL_W,
+      height: TEKLIF_MODAL_H,
       preload: path.join(__dirname, 'preload-teklif-modal.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-  });
+    })
+  );
 
-  teklifModalWindow.setAlwaysOnTop(true, 'screen-saver');
-  teklifModalWindow.setVisibleOnAllWorkspaces(true, {
-    visibleOnFullScreen: true,
-  });
+  floatingWindow.applyFloatingBehavior(teklifModalWindow);
   positionTeklifModalWindow();
   teklifModalWindow.loadFile('teklif-modal.html');
   teklifModalWindow.once('ready-to-show', () => {
     if (!teklifModalWindow || teklifModalWindow.isDestroyed()) return;
-    teklifModalWindow.show();
-    teklifModalWindow.focus();
+    floatingWindow.showOverlay(teklifModalWindow, { stealFocus: true });
   });
   teklifModalWindow.on('closed', () => {
     teklifModalWindow = null;
     pushFabState();
     if (fabWindow && !fabWindow.isDestroyed() && config.getPublic().showDesktopFab) {
-      fabWindow.showInactive();
+      showFabWindow();
     }
   });
 
@@ -333,10 +339,11 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
   config.load();
   createTray();
+  await applyMrpDesktopIdentity();
   createWindow();
 
   // VBA zInternet.RunBootAutoStartIfNeeded karşılığı
@@ -346,9 +353,18 @@ app.whenReady().then(() => {
     });
   }, 1500);
 
-  screen.on('display-metrics-changed', () => positionFabWindow());
-  screen.on('display-added', () => positionFabWindow());
-  screen.on('display-removed', () => positionFabWindow());
+  screen.on('display-metrics-changed', () => {
+    positionFabWindow();
+    positionTeklifModalWindow();
+  });
+  screen.on('display-added', () => {
+    positionFabWindow();
+    positionTeklifModalWindow();
+  });
+  screen.on('display-removed', () => {
+    positionFabWindow();
+    positionTeklifModalWindow();
+  });
 
   const mrpSession = getMrpSession();
   let cookieNotifyTimer = null;
@@ -402,11 +418,27 @@ ipcMain.handle('config:save', (_event, partial) => {
     const saved = config.save(partial || {});
     syncDesktopFab();
     pushFabState();
+    applyMrpDesktopIdentity();
     return { ok: true, config: saved };
   } catch (err) {
     return { ok: false, error: err.message || String(err) };
   }
 });
+
+ipcMain.on('desktop:parseAction', (event, url) => {
+  event.returnValue = desktopIdentity.parseDesktopAction(url);
+});
+
+ipcMain.on('app:webviewPreload', (event) => {
+  event.returnValue = path.join(__dirname, 'preload-webview.js');
+});
+
+ipcMain.handle('desktop:identity', () => ({
+  ok: true,
+  uaToken: desktopIdentity.UA_TOKEN,
+  cookieName: desktopIdentity.COOKIE_NAME,
+  cookieValue: desktopIdentity.COOKIE_VALUE,
+}));
 
 ipcMain.on('desktop-fab:ready', () => {
   pushFabState();

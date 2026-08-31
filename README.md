@@ -21,16 +21,18 @@ MRP API’den teklif numarası alıp Masaüstüne klasör oluşturan Electron uy
 |------|---------|
 | Base URL | API ve web kök adresi |
 | Firma adı | Giriş/panel: `{base}/{firma}/ps/admin` (boşsa `{base}/admin`) |
-| JWT | `authtoken` header; yalnızca `%AppData%\desktop-teklif\settings.json` |
-| Masaüstü FAB | Uygulama açıkken sağ altta yüzen buton → masaüstü teklif formu |
+| JWT | `authtoken` header; Windows `%AppData%\desktop-teklif\settings.json`, macOS `~/Library/Application Support/desktop-teklif/settings.json`, Linux `~/.config/desktop-teklif/settings.json` |
+| Masaüstü FAB | Uygulama açıkken sağ altta yüzen buton (Windows / macOS / Linux) → masaüstü teklif formu |
 
 Örnek klasör: önce `Desktop\örnek klasör`, yoksa paket içi kopya (`örnek klasör`).
 
 ## Çalıştırma / Build
 
 ```bash
-npm start          # geliştirme
+npm start          # geliştirme (Windows / macOS / Linux)
 npm run dist       # Windows portable exe → dist/
+npm run dist:linux # Linux AppImage
+npm run dist:mac   # macOS dmg/zip
 ```
 
 İkon: `build/icon.ico` (Windows) / `build/icon.png`.
@@ -46,10 +48,11 @@ npm run dist       # Windows portable exe → dist/
 
 ## Notlar
 
-- JWT yalnızca `%AppData%` altındaki `settings.json` içinde saklanır; repoda sabit token yoktur.
+- JWT `settings.json` içinde saklanır (Windows `%AppData%`, macOS Application Support, Linux `~/.config`); repoda sabit token yoktur.
 - **Yeni Teklif** yalnızca JWT + [teklif sunucu](https://nextjs-teklif-sunucu.vercel.app/api-referans/) lisansı (`license: true`) ile açılır.
-- Web oturumunda sidebar gizlenir; uygulama içi **Yeni Teklif** sağ alt FAB olur.
-- Masaüstü FAB (Ayarlar’dan) tıklanınca ana pencere yerine masaüstü modal açılır.
+- Web oturumunda native sidebar gizlenir; uygulama içi **Yeni Teklif** sağ alt FAB olur.
+- MRP webview kendini `DesktopTeklif/1` User-Agent ve `mrp_desktop=1` çerezi ile tanıtır (Perfex `mrp_theme` PR #12). Tema kenar çubuğuna yalnızca Electron’da **Yeni teklif**, **Operasyon**, **Ayarlar** ekler. Tıklamalar native modal / sidebar / ayarlar ekranına bağlanır.
+- Masaüstü FAB (Ayarlar’dan) Windows, macOS ve Linux’ta ekran sağ altında diğer pencerelerin üstünde kalır; tıklanınca ana pencere yerine masaüstü modal açılır.
 - Oluşturma sırasında butonlar **Oluşturuluyor…** ile kilitlenir (çift tıklama engeli).
 
 ## Excel VBA — JWT / baseUrl Desktop Teklif’ten

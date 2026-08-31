@@ -17,6 +17,14 @@ const userNameEl = document.getElementById('userName');
 const userRoleEl = document.getElementById('userRole');
 const userAvatarEl = document.getElementById('userAvatar');
 const pageWebview = document.getElementById('pageWebview');
+if (window.teklifApp.webviewPreloadPath) {
+  try {
+    const preloadPath = window.teklifApp.webviewPreloadPath();
+    if (preloadPath) pageWebview.setAttribute('preload', preloadPath);
+  } catch {
+    // HTML preload yedek
+  }
+}
 const titlebarBrand = document.getElementById('titlebarBrand');
 const historyList = document.getElementById('historyList');
 const confirmModal = document.getElementById('confirmModal');
@@ -689,6 +697,32 @@ async function createTeklifAction(payload = {}) {
   }
 }
 
+function handleDesktopMenuAction(raw) {
+  const action =
+    (window.teklifApp.parseDesktopAction &&
+      window.teklifApp.parseDesktopAction(raw)) ||
+    raw;
+  if (action === 'yeni-teklif') {
+    requestCreateTeklif();
+    return true;
+  }
+  if (action === 'ayarlar') {
+    showView('ayarlar', {
+      navBtn: document.querySelector('.nav-item[data-view="ayarlar"]'),
+    });
+    return true;
+  }
+  if (action === 'operasyon') {
+    setSidebarHidden(false);
+    showView('web', {
+      path: lastWebPath || '',
+      navBtn: document.querySelector('.nav-item[data-view="web"][title="Panel"]'),
+    });
+    return true;
+  }
+  return false;
+}
+
 function requestCreateTeklif() {
   if (creatingTeklif) return;
   if (!cachedHasAuth) {
@@ -793,6 +827,48 @@ settingsForm.addEventListener('submit', async (e) => {
   await loadUserInfo();
   await loadCompanyBrand();
   await refreshLicense();
+  if (!document.getElementById('view-web').hidden) {
+    loadWebPath(lastWebPath || '');
+  }
+});
+
+pageWebview.addEventListener('dom-ready', () => {
+  try {
+    const ua = pageWebview.getUserAgent();
+    if (ua && ua.indexOf('DesktopTeklif/1') === -1) {
+      pageWebview.setUserAgent(ua + ' DesktopTeklif/1');
+    }
+  } catch {
+    // webview henüz hazır olmayabilir
+  }
+});
+
+pageWebview.addEventListener('will-navigate', (e) => {
+  const action =
+    window.teklifApp.parseDesktopAction &&
+    window.teklifApp.parseDesktopAction(e.url);
+  if (!action) return;
+  e.preventDefault();
+  handleDesktopMenuAction(action);
+});
+
+pageWebview.addEventListener('will-redirect', (e) => {
+  const action =
+    window.teklifApp.parseDesktopAction &&
+    window.teklifApp.parseDesktopAction(e.url);
+  if (!action) return;
+  e.preventDefault();
+  handleDesktopMenuAction(action);
+});
+
+pageWebview.addEventListener('ipc-message', (e) => {
+  if (e.channel === 'desktop-action') {
+    handleDesktopMenuAction(e.args && e.args[0]);
+    return;
+  }
+  if (e.channel === 'desktop-navigate') {
+    handleDesktopMenuAction(e.args && e.args[0]);
+  }
 });
 
 pageWebview.addEventListener('did-navigate', () => {

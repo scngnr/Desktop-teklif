@@ -23,6 +23,8 @@ contextBridge.exposeInMainWorld('teklifApp', {
     ipcRenderer.invoke('remote:runAutoStart', methodName, !!runOnce),
   runBootAutoStart: () => ipcRenderer.invoke('remote:bootAutoStart'),
   setDesktopFabBusy: (busy) => ipcRenderer.invoke('desktop-fab:setBusy', !!busy),
+  parseDesktopAction: (url) => ipcRenderer.sendSync('desktop:parseAction', url),
+  webviewPreloadPath: () => ipcRenderer.sendSync('app:webviewPreload'),
   onSessionChanged: (handler) => {
     const listener = (_event, payload) => handler(payload);
     ipcRenderer.on('session:changed', listener);

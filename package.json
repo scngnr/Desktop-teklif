@@ -8,7 +8,10 @@
   "scripts": {
     "start": "electron .",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder --win portable"
+    "dist": "electron-builder --win portable",
+    "dist:win": "electron-builder --win portable",
+    "dist:linux": "electron-builder --linux AppImage",
+    "dist:mac": "electron-builder --mac"
   },
   "devDependencies": {
     "electron": "^33.2.0",
@@ -25,6 +28,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "preload-webview.js",
       "preload-fab.js",
       "preload-teklif-modal.js",
       "fab.html",
@@ -60,6 +64,18 @@
     },
     "portable": {
       "artifactName": "Desktop-Teklif--portable.exe"
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "target": ["AppImage"],
+      "category": "Office",
+      "artifactName": "Desktop-Teklif--${version}.${ext}"
+    },
+    "mac": {
+      "icon": "build/icon.png",
+      "target": ["dmg", "zip"],
+      "category": "public.app-category.business",
+      "artifactName": "Desktop-Teklif--${version}.${ext}"
     }
   }
 }
