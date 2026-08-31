@@ -55,8 +55,13 @@ function buildPerfexMenuInjectScript(payload) {
       '.widget-newsfeed',
       'li.menu-item-dt-ayarlar',
       'li.menu-item-desktop-ayarlar',
+      'li.menu-item-desktop_teklif_ayarlar',
+      'li.menu-item-desktop_teklif_yeni',
+      'li.menu-item-desktop_teklif_operasyon',
       'a[href^="desktop-teklif://ayarlar"]',
       'a[data-desktop-action="ayarlar"]',
+      'a[data-desktop-action="yeni"]',
+      'a[data-desktop-action="yeni-teklif"]',
     ];
 
     function textLooksNews(el) {
@@ -99,15 +104,12 @@ function buildPerfexMenuInjectScript(payload) {
       style.textContent = [
         '#' + MENU_ID + '{list-style:none;margin:8px 10px 14px;padding:0;}',
         '#' + MENU_ID + ' .dt-card{background:rgba(31,111,235,.12);border:1px solid rgba(31,111,235,.28);border-radius:10px;padding:10px 12px;color:#e8eef6;}',
-        '#' + MENU_ID + ' .dt-user{display:flex;gap:10px;align-items:center;margin-bottom:8px;}',
-        '#' + MENU_ID + ' .dt-avatar{width:36px;height:36px;border-radius:50%;background:linear-gradient(145deg,#2d5a9e,#1f6feb);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;flex-shrink:0;}',
-        '#' + MENU_ID + ' .dt-name{font-weight:650;font-size:13px;line-height:1.2;}',
-        '#' + MENU_ID + ' .dt-role{font-size:11px;opacity:.75;margin-top:2px;}',
+        '#' + MENU_ID + ' .dt-role{font-size:11px;opacity:.75;margin:0 2px 8px;}',
         '#' + MENU_ID + ' .dt-section{margin:10px 2px 4px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;opacity:.7;}',
         '#' + MENU_ID + ' a.dt-link{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;color:#e8eef6;text-decoration:none;font-size:13px;}',
         '#' + MENU_ID + ' a.dt-link:hover{background:rgba(255,255,255,.06);}',
+        '#' + MENU_ID + ' a.dt-ops{font-weight:650;background:rgba(31,111,235,.22);}',
         '#' + MENU_ID + ' a.dt-warn{color:#f85149;}',
-        '#' + MENU_ID + ' a.dt-ok{color:#3fb950;}',
         '#' + MENU_ID + ' .dt-empty{font-size:12px;opacity:.65;padding:4px 10px;}',
       ].join('');
       document.head.appendChild(style);
@@ -144,12 +146,17 @@ function buildPerfexMenuInjectScript(payload) {
         parent.insertBefore(root, parent.firstChild);
       }
 
-      const tasksHtml = (payload.tasks || []).map((t) => {
-        const cls = t.tone === 'err' ? 'dt-link dt-warn' : t.tone === 'ok' ? 'dt-link dt-ok' : 'dt-link';
-        const action = esc(String(t.action || ''));
-        const extra = esc(String(t.extra != null ? t.extra : ''));
-        return '<a class="' + cls + '" href="#" data-desktop-action="' + action + '" data-desktop-extra="' + extra + '">' + esc(t.label || '') + '</a>';
-      }).join('');
+      const tasksHtml = (payload.tasks || [])
+        .filter((t) => {
+          const action = String(t.action || '');
+          return action !== 'yeni' && action !== 'yeni-teklif';
+        })
+        .map((t) => {
+          const cls = t.tone === 'err' ? 'dt-link dt-warn' : 'dt-link';
+          const action = esc(String(t.action || ''));
+          const extra = esc(String(t.extra != null ? t.extra : ''));
+          return '<a class="' + cls + '" href="#" data-desktop-action="' + action + '" data-desktop-extra="' + extra + '">' + esc(t.label || '') + '</a>';
+        }).join('');
 
       const historyHtml = (payload.history || []).length
         ? payload.history.map((h) => (
@@ -160,14 +167,9 @@ function buildPerfexMenuInjectScript(payload) {
 
       root.innerHTML =
         '<div class="dt-card">' +
-          '<div class="dt-user">' +
-            '<div class="dt-avatar">' + esc(payload.avatar || '?') + '</div>' +
-            '<div><div class="dt-name">' + esc(payload.userName || '') + '</div>' +
-            '<div class="dt-role">' + esc(payload.userRole || '') + '</div></div>' +
-          '</div>' +
           (payload.licenseLabel ? '<div class="dt-role">' + esc(payload.licenseLabel) + '</div>' : '') +
-          '<p class="dt-section">Yapılacaklar</p>' +
-          (tasksHtml || '<p class="dt-empty">Bekleyen işlem yok</p>') +
+          '<a class="dt-link dt-ops" href="#" data-desktop-action="operasyon">Operasyon</a>' +
+          tasksHtml +
           '<p class="dt-section">Son teklifler</p>' +
           historyHtml +
         '</div>';
@@ -205,9 +207,14 @@ if (require.main === module) {
     script.includes('newsfeed') &&
     script.includes('menu-item-dt-ayarlar') &&
     !script.includes('>Ayarlar<') &&
-    script.includes('Yapılacaklar') &&
+    script.includes('data-desktop-action="operasyon"') &&
+    script.includes('>Operasyon<') &&
+    !script.includes('dt-user') &&
+    !script.includes('dt-avatar') &&
+    !script.includes('Yapılacaklar') &&
     !script.includes('id="dt-teklif-btn"') &&
-    !script.includes('>Yeni Teklif<');
+    !script.includes('>Yeni Teklif<') &&
+    !script.includes('Yeni teklif');
   if (!ok) {
     console.error('FAIL inject script markers');
     process.exit(1);

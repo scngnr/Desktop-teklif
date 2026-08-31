@@ -760,13 +760,6 @@ function collectDesktopTasks() {
       tone: 'err',
     });
   }
-  if (cachedHasAuth && licenseOk) {
-    tasks.push({
-      label: 'Yeni teklif oluşturabilirsiniz',
-      action: 'yeni',
-      tone: 'ok',
-    });
-  }
   return tasks;
 }
 
