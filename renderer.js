@@ -55,6 +55,9 @@ let licenseOk = false;
 let lastLicense = null;
 let previewTeklifNo = 'teklif-no';
 let lastWebPath = '';
+let injectRetryTimer = null;
+let injectRetryCount = 0;
+const INJECT_RETRY_MAX = 24;
 
 function showToast(message, kind = 'info', durationMs = 4200, action = null) {
   const text = String(message || '').trim();
@@ -763,6 +766,16 @@ function collectDesktopTasks() {
   return tasks;
 }
 
+function schedulePerfexMenuRetry() {
+  if (injectRetryCount >= INJECT_RETRY_MAX) return;
+  if (injectRetryTimer) return;
+  injectRetryTimer = setTimeout(() => {
+    injectRetryTimer = null;
+    injectRetryCount += 1;
+    injectPerfexDesktopMenu();
+  }, 400);
+}
+
 function injectPerfexDesktopMenu() {
   if (!window.teklifApp.buildPerfexMenuInject) return;
   const payload = {
@@ -787,14 +800,22 @@ function injectPerfexDesktopMenu() {
     console.log('[perfex-menu] inject script:', err && err.message);
     return;
   }
-  if (!script || !pageWebview || !pageWebview.executeJavaScript) return;
+  if (!script || !pageWebview || !pageWebview.executeJavaScript) {
+    schedulePerfexMenuRetry();
+    return;
+  }
   try {
     const pending = pageWebview.executeJavaScript(script);
-    if (pending && typeof pending.catch === 'function') {
-      pending.catch(() => {});
+    if (pending && typeof pending.then === 'function') {
+      pending
+        .then((painted) => {
+          if (painted === false) schedulePerfexMenuRetry();
+          else injectRetryCount = 0;
+        })
+        .catch(() => schedulePerfexMenuRetry());
     }
   } catch {
-    // webview henüz dom-ready değil
+    schedulePerfexMenuRetry();
   }
 }
 
@@ -817,6 +838,7 @@ function handleDesktopMenuAction(raw, extra) {
     return true;
   }
   if (action === 'operasyon') {
+    // Native #view-operasyon; Electron sol menüyü geri açma.
     showView('operasyon');
     return true;
   }
@@ -953,6 +975,7 @@ pageWebview.addEventListener('dom-ready', () => {
   } catch {
     // webview henüz hazır olmayabilir
   }
+  injectPerfexDesktopMenu();
 });
 
 pageWebview.addEventListener('will-navigate', (e) => {
@@ -992,6 +1015,7 @@ pageWebview.addEventListener('did-navigate-in-page', () => {
 });
 
 pageWebview.addEventListener('did-finish-load', () => {
+  injectRetryCount = 0;
   refreshLoginState();
   injectPerfexDesktopMenu();
 });
