@@ -795,7 +795,14 @@ function injectPerfexDesktopMenu() {
     return;
   }
   if (!script || !pageWebview || !pageWebview.executeJavaScript) return;
-  pageWebview.executeJavaScript(script).catch(() => {});
+  try {
+    const pending = pageWebview.executeJavaScript(script);
+    if (pending && typeof pending.catch === 'function') {
+      pending.catch(() => {});
+    }
+  } catch {
+    // webview henüz dom-ready değil
+  }
 }
 
 function handleDesktopMenuAction(raw, extra) {
@@ -1027,12 +1034,16 @@ layout.classList.add('native-nav-off');
 setSidebarHidden(true);
 content.classList.add('content-web');
 refreshConfigCache().then(async () => {
-  await Promise.all([
-    loadUserInfo(),
-    loadCompanyBrand(),
-    loadHistory(),
-    refreshLicense(),
-  ]);
+  try {
+    await Promise.all([
+      loadUserInfo(),
+      loadCompanyBrand(),
+      loadHistory(),
+      refreshLicense(),
+    ]);
+  } catch (err) {
+    console.log('[boot]', err && err.message);
+  }
 
   await showView('web', { path: '' });
   if (!cachedHasAuth) {
