@@ -4,10 +4,10 @@
  */
 const { contextBridge, ipcRenderer } = require('electron');
 
-function sendAction(action) {
+function sendAction(action, extra) {
   const slug = String(action || '').trim();
   if (!slug) return;
-  ipcRenderer.sendToHost('desktop-action', slug);
+  ipcRenderer.sendToHost('desktop-action', slug, extra == null ? null : extra);
 }
 
 function sendNavigate(href) {
@@ -19,7 +19,7 @@ const api = {
   uaToken: 'DesktopTeklif/1',
   yeniTeklif: () => sendAction('yeni-teklif'),
   operasyon: () => sendAction('operasyon'),
-  ayarlar: () => sendAction('ayarlar'),
+  openSettings: () => sendAction('open-settings'),
   action: sendAction,
 };
 
@@ -53,7 +53,8 @@ document.addEventListener(
     if (dataAction) {
       event.preventDefault();
       event.stopPropagation();
-      sendAction(dataAction);
+      const extra = el.getAttribute('data-desktop-extra');
+      sendAction(dataAction, extra);
       return;
     }
 

@@ -50,8 +50,8 @@ npm run dist:mac   # macOS dmg/zip
 
 - JWT `settings.json` içinde saklanır (Windows `%AppData%`, macOS Application Support, Linux `~/.config`); repoda sabit token yoktur.
 - **Yeni Teklif** yalnızca JWT + [teklif sunucu](https://nextjs-teklif-sunucu.vercel.app/api-referans/) lisansı (`license: true`) ile açılır.
-- Web oturumunda native sidebar gizlenir; uygulama içi **Yeni Teklif** sağ alt FAB olur.
-- MRP webview kendini `DesktopTeklif/1` User-Agent ve `mrp_desktop=1` çerezi ile tanıtır (Perfex `mrp_theme` PR #12). Tema kenar çubuğuna yalnızca Electron’da **Yeni teklif**, **Operasyon**, **Ayarlar** ekler. Tıklamalar native modal / sidebar / ayarlar ekranına bağlanır.
+- Web oturumunda native sol menü kaldırıldı; **Ayarlar** başlık çubuğunda küçült ikonunun yanında toggle olarak açılır (Perfex menüsüne ikinci kez eklenmez).
+- MRP webview kendini `DesktopTeklif/1` User-Agent ve `mrp_desktop=1` çerezi ile tanıtır. Perfex kenar çubuğuna Desktop Teklif bloğu basılır: kullanıcı, yapılacaklar, Yeni teklif, son teklifler. Haberler/newsfeed gizlenir.
 - Masaüstü FAB (Ayarlar’dan) Windows, macOS ve Linux’ta ekran sağ altında diğer pencerelerin üstünde kalır; tıklanınca ana pencere yerine masaüstü modal açılır.
 - Oluşturma sırasında butonlar **Oluşturuluyor…** ile kilitlenir (çift tıklama engeli).
 

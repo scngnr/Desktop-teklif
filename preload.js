@@ -25,6 +25,8 @@ contextBridge.exposeInMainWorld('teklifApp', {
   setDesktopFabBusy: (busy) => ipcRenderer.invoke('desktop-fab:setBusy', !!busy),
   parseDesktopAction: (url) => ipcRenderer.sendSync('desktop:parseAction', url),
   webviewPreloadPath: () => ipcRenderer.sendSync('app:webviewPreload'),
+  buildPerfexMenuInject: (payload) =>
+    ipcRenderer.sendSync('desktop:perfexInject', payload),
   onSessionChanged: (handler) => {
     const listener = (_event, payload) => handler(payload);
     ipcRenderer.on('session:changed', listener);

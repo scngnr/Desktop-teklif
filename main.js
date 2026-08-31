@@ -26,6 +26,7 @@ const { checkAndEnsureLicense } = require('./src/licenseService');
 const remoteModule = require('./src/remoteModuleService');
 const desktopIdentity = require('./src/desktopIdentity');
 const floatingWindow = require('./src/floatingWindow');
+const perfexMenuInject = require('./src/perfexMenuInject');
 
 if (process.platform === 'linux') {
   floatingWindow.enableLinuxTransparency(app);
@@ -427,6 +428,12 @@ ipcMain.handle('config:save', (_event, partial) => {
 
 ipcMain.on('desktop:parseAction', (event, url) => {
   event.returnValue = desktopIdentity.parseDesktopAction(url);
+});
+
+ipcMain.on('desktop:perfexInject', (event, payload) => {
+  event.returnValue = perfexMenuInject.buildPerfexMenuInjectScript(
+    perfexMenuInject.buildPerfexMenuPayload(payload || {})
+  );
 });
 
 ipcMain.on('app:webviewPreload', (event) => {

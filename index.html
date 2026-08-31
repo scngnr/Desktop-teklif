@@ -11,14 +11,15 @@
   <div class="shell">
     <header class="titlebar" id="titlebar">
       <div class="titlebar-drag">
-        <button type="button" class="sidebar-toggle" id="btnSidebarToggle" title="Menüyü daralt/genişlet" aria-label="Menüyü daralt">
-          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-            <path d="M2 3.5h10M2 7h10M2 10.5h10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
-          </svg>
-        </button>
         <span class="titlebar-brand" id="titlebarBrand">Desktop Teklif</span>
       </div>
       <div class="window-controls">
+        <button type="button" class="win-btn win-settings" id="btnTitleAyarlar" title="Ayarlar" aria-label="Ayarlar" aria-pressed="false">
+          <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.2a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.2a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.2a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9c.3.6.9 1 1.5 1.1H21a2 2 0 1 1 0 4h-.2a1.7 1.7 0 0 0-1.4 1z"></path>
+          </svg>
+        </button>
         <button type="button" class="win-btn win-min" id="btnMinimize" title="Küçült" aria-label="Küçült">
           <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="5.5" width="10" height="1.2" fill="currentColor"/></svg>
         </button>
@@ -28,7 +29,7 @@
       </div>
     </header>
 
-    <div class="layout" id="layout">
+    <div class="layout native-nav-off" id="layout">
       <aside class="sidebar" id="sidebar">
         <div class="user-card">
           <div class="user-avatar" id="userAvatar">?</div>
@@ -45,7 +46,7 @@
             <span class="nav-label">Yeni Teklif</span>
           </button>
           <p class="license-status" id="licenseStatus">Lisans kontrol ediliyor…</p>
-          <button type="button" class="nav-item" data-view="ayarlar" title="Ayarlar">
+          <button type="button" class="nav-item" data-view="ayarlar" title="Ayarlar" hidden>
             <span class="nav-icon" aria-hidden="true">⚙</span>
             <span class="nav-label">Ayarlar</span>
           </button>
@@ -62,9 +63,10 @@
       </aside>
 
       <main class="content" id="content">
-        <section class="view" id="view-ayarlar" hidden>
+        <section class="view settings-overlay" id="view-ayarlar" hidden>
+          <div class="settings-panel" role="dialog" aria-labelledby="settingsTitle">
           <header class="page-header">
-            <h1>Ayarlar</h1>
+            <h1 id="settingsTitle">Ayarlar</h1>
             <p class="subtitle" id="settingsHint">API erişimi için Base URL ve JWT token gerekli.</p>
           </header>
 
@@ -101,6 +103,7 @@
               <button type="submit" class="btn-primary" id="btnSaveSettings">Kaydet</button>
             </div>
           </form>
+          </div>
         </section>
 
         <section class="view view-web" id="view-web">
