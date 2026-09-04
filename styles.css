@@ -115,6 +115,25 @@ button, input {
   place-items: center;
   padding: 0;
   transition: background 0.12s, color 0.12s;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.win-btn.win-ops {
+  width: auto;
+  padding: 0 10px;
+  gap: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.win-ops-label {
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .win-btn:hover {
@@ -429,7 +448,8 @@ button, input {
   border: none !important;
 }
 
-.win-settings.active {
+.win-settings.active,
+.win-ops.active {
   background: rgba(31, 111, 235, 0.28);
   color: var(--text);
 }
