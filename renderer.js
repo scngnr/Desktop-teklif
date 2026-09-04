@@ -40,6 +40,7 @@ const licenseStatusEl = document.getElementById('licenseStatus');
 const SIDEBAR_KEY = 'desktop-teklif-sidebar-collapsed';
 const CREATE_LABEL = 'Yeni Teklif';
 const CREATE_BUSY_LABEL = 'Oluşturuluyor…';
+const CONFIRM_OK_LABEL = 'Oluştur';
 
 let toastTimer = null;
 let cachedBaseUrl = '';
@@ -49,6 +50,7 @@ let cachedHasAuth = false;
 let historyItemsCache = [];
 let webLoggedIn = false;
 let creatingTeklif = false;
+let createInFlight = false;
 let companiesCache = [];
 let customersLoading = false;
 let licenseOk = false;
@@ -198,12 +200,27 @@ function syncCreateButtonsEnabled() {
   }
 }
 
+function setConfirmModalBusy(busy) {
+  if (btnConfirmOk) {
+    btnConfirmOk.disabled = busy;
+    btnConfirmOk.classList.toggle('is-busy', busy);
+    btnConfirmOk.setAttribute('aria-busy', busy ? 'true' : 'false');
+    const spinner = btnConfirmOk.querySelector('.btn-spinner');
+    const labelEl = btnConfirmOk.querySelector('.btn-label');
+    if (spinner) spinner.hidden = !busy;
+    if (labelEl) labelEl.textContent = busy ? CREATE_BUSY_LABEL : CONFIRM_OK_LABEL;
+    else btnConfirmOk.textContent = busy ? CREATE_BUSY_LABEL : CONFIRM_OK_LABEL;
+  }
+  if (btnConfirmCancel) btnConfirmCancel.disabled = busy;
+}
+
 function setCreateBusy(busy) {
-  creatingTeklif = busy;
+  creatingTeklif = !!busy;
   const label = busy ? CREATE_BUSY_LABEL : CREATE_LABEL;
   const navLabel = btnCreateTeklif && btnCreateTeklif.querySelector('.nav-label');
   if (navLabel) navLabel.textContent = label;
   syncCreateButtonsEnabled();
+  setConfirmModalBusy(busy);
   if (window.teklifApp.setDesktopFabBusy) {
     window.teklifApp.setDesktopFabBusy(busy);
   }
@@ -681,37 +698,40 @@ async function showView(viewId, options = {}) {
 }
 
 async function createTeklifAction(payload = {}) {
-  if (creatingTeklif) return;
-
-  await refreshConfigCache();
-  if (!cachedHasAuth) {
-    showToast('Önce Ayarlar’dan JWT token girin.', 'err');
-    await showView('ayarlar', {
-      navBtn: document.querySelector('.nav-item[data-view="ayarlar"]'),
-    });
-    return;
-  }
-
-  if (!licenseOk) {
-    await refreshLicense();
-  }
-  if (!licenseOk) {
-    showToast(
-      'Lisans aktif değil. Teklif butonu yalnızca lisanslı cihazda açılır.',
-      'err',
-      6500
-    );
-    return;
-  }
-
-  setCreateBusy(true);
-  showToast('API kaydı ve klasör oluşturuluyor…', 'info', 6000);
+  if (createInFlight) return;
+  createInFlight = true;
+  if (!creatingTeklif) setCreateBusy(true);
 
   try {
+    await refreshConfigCache();
+    if (!cachedHasAuth) {
+      showToast('Önce Ayarlar’dan JWT token girin.', 'err');
+      closeConfirmModal();
+      await showView('ayarlar', {
+        navBtn: document.querySelector('.nav-item[data-view="ayarlar"]'),
+      });
+      return;
+    }
+
+    if (!licenseOk) {
+      await refreshLicense();
+    }
+    if (!licenseOk) {
+      showToast(
+        'Lisans aktif değil. Teklif butonu yalnızca lisanslı cihazda açılır.',
+        'err',
+        6500
+      );
+      return;
+    }
+
+    showToast('API kaydı ve klasör oluşturuluyor…', 'info', 6000);
+
     const result = await window.teklifApp.createTeklif(payload);
     if (!result.ok) {
       showToast('Hata: ' + result.error, 'err', 6500);
       if (result.needSettings) {
+        closeConfirmModal();
         await showView('ayarlar', {
           navBtn: document.querySelector('.nav-item[data-view="ayarlar"]'),
         });
@@ -719,6 +739,7 @@ async function createTeklifAction(payload = {}) {
       return;
     }
 
+    closeConfirmModal();
     const destPath = result.destPath;
     showToast(
       'Başarılı — ' +
@@ -737,6 +758,7 @@ async function createTeklifAction(payload = {}) {
   } catch (err) {
     showToast('Beklenmeyen hata: ' + (err.message || err), 'err', 6500);
   } finally {
+    createInFlight = false;
     setCreateBusy(false);
     injectPerfexDesktopMenu();
   }
@@ -853,11 +875,14 @@ if (btnCreateTeklif) {
   btnCreateTeklif.addEventListener('click', () => requestCreateTeklif());
 }
 
-btnConfirmCancel.addEventListener('click', () => closeConfirmModal());
-btnConfirmOk.addEventListener('click', () => {
-  const payload = getCreatePayload();
+btnConfirmCancel.addEventListener('click', () => {
+  if (creatingTeklif) return;
   closeConfirmModal();
-  createTeklifAction(payload);
+});
+btnConfirmOk.addEventListener('click', () => {
+  if (creatingTeklif) return;
+  setCreateBusy(true);
+  createTeklifAction(getCreatePayload());
 });
 
 customerSearch.addEventListener('input', () => {
@@ -878,11 +903,12 @@ inputProjectName.addEventListener('input', () => {
 });
 
 confirmModal.addEventListener('click', (e) => {
-  if (e.target === confirmModal) closeConfirmModal();
+  if (e.target === confirmModal && !creatingTeklif) closeConfirmModal();
 });
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !confirmModal.hidden) {
+    if (creatingTeklif) return;
     closeConfirmModal();
     return;
   }
