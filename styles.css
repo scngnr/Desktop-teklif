@@ -940,6 +940,15 @@ button:disabled {
   margin-bottom: 12px;
 }
 
+.ops-metrics[hidden],
+.ops-list-pane[hidden],
+.ops-detail[hidden],
+.ops-workspace[hidden],
+.ops-banner[hidden],
+.ops-tab-panel[hidden] {
+  display: none !important;
+}
+
 .ops-metric {
   flex: 1;
   text-align: left;
