@@ -1,6 +1,7 @@
 const btnMinimize = document.getElementById('btnMinimize');
 const btnClose = document.getElementById('btnClose');
 const btnTitleAyarlar = document.getElementById('btnTitleAyarlar');
+const btnTitleOperasyon = document.getElementById('btnTitleOperasyon');
 const layout = document.getElementById('layout');
 const content = document.getElementById('content');
 const btnCreateTeklif = document.getElementById('btnCreateTeklif');
@@ -162,6 +163,11 @@ function syncChromeVisibility() {
   if (web) web.classList.toggle('webview-covered', cover);
   if (pageWebview) {
     pageWebview.style.visibility = 'visible';
+  }
+  if (btnTitleOperasyon) {
+    const open = isOperasyonOpen();
+    btnTitleOperasyon.classList.toggle('active', open);
+    btnTitleOperasyon.setAttribute('aria-pressed', open ? 'true' : 'false');
   }
 }
 
@@ -839,6 +845,7 @@ function handleDesktopMenuAction(raw, extra) {
     return true;
   }
   if (action === 'operasyon') {
+    // Native #view-operasyon; Electron sol menüyü geri açma (asla setSidebarHidden(false)).
     showView('operasyon');
     return true;
   }
@@ -870,6 +877,14 @@ btnTitleAyarlar.addEventListener('click', (e) => {
   e.stopPropagation();
   toggleSettings();
 });
+
+if (btnTitleOperasyon) {
+  btnTitleOperasyon.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    handleDesktopMenuAction('operasyon');
+  });
+}
 
 if (btnCreateTeklif) {
   btnCreateTeklif.addEventListener('click', () => requestCreateTeklif());
