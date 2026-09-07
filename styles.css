@@ -1033,6 +1033,10 @@ button:disabled {
   background: rgba(31, 111, 235, 0.18);
 }
 
+.ops-chips button[title] {
+  position: relative;
+}
+
 .ops-banner {
   border: 1px solid var(--border);
   border-radius: 8px;

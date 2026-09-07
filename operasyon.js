@@ -2,8 +2,9 @@
  * Native Operasyon konsolu — JWT REST.
  * İstekler teklifApp.apiRequest (src/mrpApi.js) ile gider; kök ayarlardaki
  * Base URL / Giriş URL’den türetilir (host sabitlenmez).
- * Liste: GET api/teklif (yoksa GET api/proposals).
+ * Liste: GET api/teklif (yoksa GET api/proposals), teklif id azalan.
  * Detay: GET api/teklif/{id} veya GET api/proposals/{id}.
+ * Açık chip: açık/devam eden manufacturing_orders (gerekirse work_orders).
  * MO / WO / sevkiyat: api/mrp/manufacturing_orders, work_orders, external_shipments.
  * Satırlar: teklif kalemleri + api/product + api/bom.
  * Maliyet: ayrı maliyet ucu yok; satır / ürün / BOM alanlarından defter (uydurma toplam yok).
@@ -217,6 +218,77 @@
     return false;
   }
 
+  function teklifSortId(item) {
+    const raw = item && (item.id != null && item.id !== '' ? item.id : item.proposal_id || item.teklif_id);
+    if (raw == null || raw === '') return Number.NEGATIVE_INFINITY;
+    const n = Number(raw);
+    if (Number.isFinite(n)) return n;
+    const m = String(raw).match(/(\d+)\s*$/);
+    return m ? Number(m[1]) : Number.NEGATIVE_INFINITY;
+  }
+
+  function sortTeklifIdDesc(items) {
+    return (items || []).slice().sort((a, b) => {
+      const diff = teklifSortId(b) - teklifSortId(a);
+      if (diff) return diff;
+      return String(itemId(b)).localeCompare(String(itemId(a)), undefined, { numeric: true, sensitivity: 'base' });
+    });
+  }
+
+  function productionStatusText(row) {
+    if (!row || typeof row !== 'object') return '';
+    let v =
+      row.status ??
+      row.state ??
+      row.mo_status ??
+      row.order_status ??
+      row.status_name ??
+      row.wo_status ??
+      row.manufacturing_status ??
+      row.production_status;
+    if (v && typeof v === 'object') {
+      v = v.name || v.label || v.status || v.state || v.code || '';
+    }
+    return String(v == null ? '' : v)
+      .toLowerCase()
+      .trim();
+  }
+
+  function isClosedProductionStatus(row) {
+    if (!row || typeof row !== 'object') return true;
+    if (row.cancelled === true || row.canceled === true || row.cancelled === 1 || row.canceled === 1) return true;
+    if (row.done === true || row.done === 1 || row.done === '1') return true;
+    const s = productionStatusText(row);
+    if (!s) {
+      return !!(row.date_finished || row.date_done || row.finished_at || row.completed_at);
+    }
+    if (/cancel|cancelled|canceled|iptal/.test(s)) return true;
+    if (/incomplete|unfinished|in[\s_-]*progress/.test(s)) return false;
+    if (/^(done|complete|completed|finished|closed|tamam|tamamland[iı]|kapat|kapatild[iı])$/.test(s)) return true;
+    if (/\b(done|completed|finished|closed)\b/.test(s)) return true;
+    const n = Number(s);
+    if (s === '4' || s === '5' || n === 4 || n === 5) return true;
+    return false;
+  }
+
+  function isOpenProductionStatus(row) {
+    return Boolean(row) && !isClosedProductionStatus(row);
+  }
+
+  function collectOpenTeklifIds(items, moRows, woRows) {
+    const ids = new Set();
+    const openMos = (moRows || []).filter(isOpenProductionStatus);
+    const openWos = (woRows || []).filter(isOpenProductionStatus);
+    (items || []).forEach((item) => {
+      const id = itemId(item);
+      if (!id) return;
+      const hitMo = openMos.some((row) => matchesProposal(row, id, item));
+      const hitWo = !hitMo && openWos.some((row) => matchesProposal(row, id, item));
+      if (hitMo || hitWo) ids.add(String(id));
+    });
+    return ids;
+  }
+
   function isOverdue(item) {
     const till = item && (item.open_till || item.date_end || item.due_date);
     if (!till) return false;
@@ -418,7 +490,7 @@
         status === 'accepted'
           ? 'Kabul edilmiş teklif yok'
           : status === 'open'
-            ? 'Açık teklif yok'
+            ? 'Açık üretim emri olan teklif yok'
             : 'Kayıt yok';
       const emptyBody = info.emptyHint
         ? info.emptyHint
@@ -534,9 +606,14 @@
     return (result && result.items) || [];
   }
 
-  function filterByStatus(items) {
+  function filterByStatus(items, openTeklifIds) {
     if (status === 'all') return items;
-    return items.filter((item) => (status === 'accepted' ? isAccepted(item) : isOpenStatus(item)));
+    if (status === 'accepted') return items.filter(isAccepted);
+    if (status === 'open') {
+      const ids = openTeklifIds || new Set();
+      return items.filter((item) => ids.has(String(itemId(item))));
+    }
+    return items;
   }
 
   function matchesQuery(item, q) {
@@ -558,7 +635,11 @@
     const sub = el('opsSubtitle');
     if (title) {
       title.textContent =
-        status === 'accepted' ? 'Kabul edilmiş teklifler' : status === 'open' ? 'Açık teklifler' : 'Tüm teklifler';
+        status === 'accepted'
+          ? 'Kabul edilmiş teklifler'
+          : status === 'open'
+            ? 'Açık üretim emri olan teklifler'
+            : 'Tüm teklifler';
     }
     if (sub) {
       const host = cachedBaseUrl ? ' · ' + cachedBaseUrl : '';
@@ -1086,9 +1167,10 @@
       }
     }
 
-    const [listRes, moRes] = await Promise.all([
+    const [listRes, moRes, woRes] = await Promise.all([
       fetchTeklifList(),
       apiGet('api/mrp/manufacturing_orders'),
+      apiGet('api/mrp/work_orders'),
     ]);
 
     if (!listRes.ok) {
@@ -1112,13 +1194,28 @@
     let items = listRes.items || [];
     lastListItems = items.slice();
 
+    const moOk = !!(moRes && moRes.ok && moRes.json != null);
+    const woOk = !!(woRes && woRes.ok && woRes.json != null);
+    const moRows = moOk ? unwrapRecords(moRes.json) : [];
+    const woRows = woOk ? unwrapRecords(woRes.json) : [];
+    const openTeklifIds = collectOpenTeklifIds(items, moRows, woRows);
+
     const metrics = {
       accepted: items.filter(isAccepted).length,
-      open: items.filter(isOpenStatus).length,
+      open: moOk || woOk ? openTeklifIds.size : '—',
       overdue: items.filter(isOverdue).length,
-      mo: moRes && moRes.ok ? unwrapRecords(moRes.json).length : '—',
+      mo: moOk ? moRows.length : '—',
     };
     renderMetrics(null, metrics);
+
+    if (status === 'open' && !moOk && !woOk) {
+      const failed = (moRes && moRes.status !== 404 ? moRes : woRes) || moRes;
+      setBanner(
+        explainError(failed) +
+          ' Açık filtresi GET api/mrp/manufacturing_orders (gerekirse work_orders) ile açık MO eşler; sahte kayıt yok.',
+        'warn'
+      );
+    }
 
     if (scope === 'ids') {
       const idSet = new Set(ids);
@@ -1137,13 +1234,18 @@
       }
     }
 
-    if (status !== 'all') {
-      items = filterByStatus(items);
-    }
+    items = filterByStatus(items, collectOpenTeklifIds(items, moRows, woRows));
+    items = sortTeklifIdDesc(items);
 
     const sliced = items.slice(offset, offset + LIMIT);
     const total = items.length;
-    renderList(sliced, total, { source: searchSource });
+    const listMeta = { source: searchSource };
+    if (status === 'open' && sliced.length === 0) {
+      listMeta.emptyHint = moOk
+        ? 'Açık/devam eden manufacturing_orders (tamamlanmamış, iptal değil) proposal_id / rel_id / teklif id ile eşleşmedi.'
+        : 'Açık üretim emri listesi alınamadı; sahte kayıt gösterilmez.';
+    }
+    renderList(sliced, total, listMeta);
     setListTitle(total + ' kayıt · tıklayınca MO / satınalma / sevkiyat / maliyet');
   }
 

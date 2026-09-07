@@ -140,13 +140,13 @@ API: —</p>
             <div class="ops-toolbar">
               <input type="search" id="opsSearch" placeholder="Teklif no, müşteri veya konu ara…" autocomplete="off" spellcheck="false" />
               <div class="ops-chips" id="opsStatusChips">
-                <button type="button" data-value="accepted" class="active">Kabul edilmiş</button>
-                <button type="button" data-value="open">Açık</button>
-                <button type="button" data-value="all">Tümü</button>
+                <button type="button" data-value="accepted" class="active" title="Kabul edilmiş teklifler">Kabul edilmiş</button>
+                <button type="button" data-value="open" title="Yalnızca açık üretim emri (MO) olan teklifler">Açık</button>
+                <button type="button" data-value="all" title="Tüm teklifler">Tümü</button>
               </div>
               <div class="ops-chips" id="opsScopeChips">
-                <button type="button" data-value="outstanding" class="active">Bekleyen</button>
-                <button type="button" data-value="ids">Yerel teklifler</button>
+                <button type="button" data-value="outstanding" class="active" title="Sunucu teklif listesi">Bekleyen</button>
+                <button type="button" data-value="ids" title="Bu cihazda oluşturulan teklifler">Yerel teklifler</button>
               </div>
             </div>
             <div class="ops-banner" id="opsBanner" hidden></div>
