@@ -36,9 +36,10 @@ function getAuthHeaders(extra = {}) {
 
 async function apiRequest(method, path, body) {
   const cfg = config.get();
-  const base = cfg.baseUrl.replace(/\/$/, '');
+  // Tenant REST kökü Giriş URL ile aynı formülden: adminRoot eksi /admin
+  const apiRoot = config.buildApiRoot(cfg.baseUrl, cfg.firmaAdi).replace(/\/$/, '');
   const p = String(path || '').replace(/^\//, '');
-  const url = `${base}/${p}`;
+  const url = `${apiRoot}/${p}`;
 
   const headers = getAuthHeaders(
     body !== undefined
@@ -267,11 +268,14 @@ function parseCompanyFromHtml(html) {
  */
 async function fetchCompanyName() {
   const cfg = config.getPublic();
-  const adminRoot = (cfg.adminRoot || `${cfg.baseUrl}/admin`).replace(/\/+$/, '');
+  const adminRoot = (cfg.adminRoot || config.buildAdminRoot(cfg.baseUrl, cfg.firmaAdi)).replace(
+    /\/+$/,
+    ''
+  );
   const candidates = [
     `${adminRoot}/api/api_guide`,
     adminRoot,
-    `${cfg.baseUrl.replace(/\/+$/, '')}/admin/authentication`,
+    `${adminRoot}/authentication`,
   ];
 
   for (const url of candidates) {

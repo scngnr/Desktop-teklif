@@ -140,6 +140,11 @@ function buildAdminRoot(baseUrl, firmaAdi) {
   return `${base}/admin`;
 }
 
+/** REST kökü: Giriş URL (adminRoot) eksi /admin — {base}/{firma}/ps veya {base} */
+function buildApiRoot(baseUrl, firmaAdi) {
+  return buildAdminRoot(baseUrl, firmaAdi).replace(/\/admin\/?$/, '');
+}
+
 function applySidebarCollapsed(collapsed) {
   layout.classList.toggle('sidebar-collapsed', collapsed);
   try {
@@ -320,10 +325,13 @@ function updateGirisUrlPreview() {
   const base = (inputBaseUrl.value || cachedBaseUrl || '').trim();
   const firma = inputFirmaAdi.value;
   if (!base) {
-    girisUrlPreview.textContent = 'Giriş URL: —';
+    girisUrlPreview.textContent = 'Giriş URL: —\nAPI: —';
     return;
   }
-  girisUrlPreview.textContent = 'Giriş URL: ' + buildAdminRoot(base, firma);
+  const admin = buildAdminRoot(base, firma);
+  const apiRoot = buildApiRoot(base, firma);
+  girisUrlPreview.textContent =
+    'Giriş URL: ' + admin + '\nAPI: ' + apiRoot + '/api/…';
 }
 
 async function refreshConfigCache() {
@@ -383,7 +391,7 @@ async function loadSettingsForm() {
   inputJwt.value = cfg.authToken || '';
   toggleDesktopFab.checked = !!cfg.showDesktopFab;
   settingsHint.textContent = cfg.hasAuthToken
-    ? 'API erişimi için Base URL ve JWT token gerekli.'
+    ? 'Base URL ve Firma adı hem Giriş URL’yi (webview) hem REST API kökünü belirler.'
     : 'İlk kurulum: JWT token girmeden teklif oluşturulamaz.';
   updateGirisUrlPreview();
 }

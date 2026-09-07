@@ -846,6 +846,10 @@ button:disabled {
   line-height: 1.4;
 }
 
+#girisUrlPreview {
+  white-space: pre-line;
+}
+
 .field input {
   background: var(--surface);
   border: 1px solid var(--border);

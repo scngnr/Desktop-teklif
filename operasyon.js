@@ -1,5 +1,7 @@
 /**
  * Native Operasyon konsolu — JWT REST.
+ * İstekler teklifApp.apiRequest üzerinden gider; kök Giriş URL'den türetilir
+ * (firma set: {base}/{firma}/ps/api/…, firma boş: {base}/api/…).
  * Liste: api/v1/mrp/operations/proposals (404 ise açıklama + work_orders yedek).
  * Detay: MO, satınalma, sevkiyat, maliyet — yalnızca mevcut api/ uçları.
  */
