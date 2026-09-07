@@ -9,7 +9,7 @@ MRP API’den teklif numarası alıp Masaüstüne klasör oluşturan Electron uy
    (hazır paket: `npm run dist` → `dist/Desktop-Teklif--portable.exe`)
 3. İlk açılışta **Ayarlar** zorunludur. Doldurun:
    - **Base URL:** örn. `https://mrp.cangungor.tr`
-   - **Firma adı:** (varsa) giriş yolu için slug → `base/firma/ps/admin`
+   - **Firma adı:** (varsa) SaaS tenant slug → Giriş URL `base/firma/ps/admin`, REST `base/firma/ps/api/…`
    - **JWT Token:** MRP API token’ı (kaynak kodda varsayılan token **yok**)
    - İsteğe bağlı: **ekran sağ altında Yeni Teklif butonu**
 4. **Kaydet** — lisans kontrolü otomatik çalışır (MAC → teklif sunucu)
@@ -19,8 +19,8 @@ MRP API’den teklif numarası alıp Masaüstüne klasör oluşturan Electron uy
 
 | Alan | Ne için |
 |------|---------|
-| Base URL | API ve web kök adresi |
-| Firma adı | Giriş/panel: `{base}/{firma}/ps/admin` (boşsa `{base}/admin`) |
+| Base URL | Site kökü (webview ve REST bu adresten türetilir) |
+| Firma adı | Giriş/panel: `{base}/{firma}/ps/admin` (boşsa `{base}/admin`). REST: `{base}/{firma}/ps/api/…` (boşsa `{base}/api/…`) |
 | JWT | `authtoken` header; Windows `%AppData%\desktop-teklif\settings.json`, macOS `~/Library/Application Support/desktop-teklif/settings.json`, Linux `~/.config/desktop-teklif/settings.json` |
 | Masaüstü FAB | Uygulama açıkken sağ altta yüzen buton (Windows / macOS / Linux) → masaüstü teklif formu |
 
@@ -39,7 +39,7 @@ npm run dist:mac   # macOS dmg/zip
 
 ## Ne yapar?
 
-1. `GET /api/teklif/last_number` (`authtoken` header)
+1. `GET {apiRoot}/api/teklif/last_number` (`authtoken` header; `apiRoot` Giriş URL’den türetilir)
 2. Sonraki teklif no: `proposal_prefix` + `ddmmyy` + `-` + (`last_proposal_id` + 1)
 3. Onay modalında müşteri / kişi / proje seçimi + teklif no önizlemesi
 4. API’ye teklif kaydı (`create_safe` / `api/teklif`)

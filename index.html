@@ -83,7 +83,7 @@
           <div class="settings-panel" role="dialog" aria-labelledby="settingsTitle">
           <header class="page-header">
             <h1 id="settingsTitle">Ayarlar</h1>
-            <p class="subtitle" id="settingsHint">API erişimi için Base URL ve JWT token gerekli.</p>
+            <p class="subtitle" id="settingsHint">Base URL ve Firma adı hem Giriş URL’yi (webview) hem REST API kökünü belirler. JWT zorunlu.</p>
           </header>
 
           <form class="settings-form" id="settingsForm">
@@ -97,7 +97,8 @@
               <input type="text" id="inputFirmaAdi" name="firmaAdi" placeholder="ornekfirma" autocomplete="off" spellcheck="false" />
             </label>
 
-            <p class="field-hint" id="girisUrlPreview">Giriş URL: —</p>
+            <p class="field-hint" id="girisUrlPreview">Giriş URL: —
+API: —</p>
 
             <label class="field">
               <span class="field-label">JWT Token</span>
