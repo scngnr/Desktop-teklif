@@ -542,6 +542,32 @@ button:disabled {
   background: var(--accent-hover);
 }
 
+.btn-primary.is-busy {
+  pointer-events: none;
+}
+
+.btn-spinner {
+  display: inline-block;
+  width: 0.85em;
+  height: 0.85em;
+  margin-right: 0.45em;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  vertical-align: -0.12em;
+  animation: btn-spin 0.7s linear infinite;
+}
+
+.btn-spinner[hidden] {
+  display: none;
+}
+
+@keyframes btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .btn-secondary {
   background: var(--surface);
   color: var(--text);
