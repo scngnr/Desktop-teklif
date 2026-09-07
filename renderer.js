@@ -2,6 +2,7 @@ const btnMinimize = document.getElementById('btnMinimize');
 const btnClose = document.getElementById('btnClose');
 const btnTitleAyarlar = document.getElementById('btnTitleAyarlar');
 const btnTitleOperasyon = document.getElementById('btnTitleOperasyon');
+const btnTitlePanel = document.getElementById('btnTitlePanel');
 const layout = document.getElementById('layout');
 const content = document.getElementById('content');
 const btnCreateTeklif = document.getElementById('btnCreateTeklif');
@@ -164,10 +165,15 @@ function syncChromeVisibility() {
   if (pageWebview) {
     pageWebview.style.visibility = 'visible';
   }
+  const opsOpen = isOperasyonOpen();
   if (btnTitleOperasyon) {
-    const open = isOperasyonOpen();
-    btnTitleOperasyon.classList.toggle('active', open);
-    btnTitleOperasyon.setAttribute('aria-pressed', open ? 'true' : 'false');
+    btnTitleOperasyon.classList.toggle('active', opsOpen);
+    btnTitleOperasyon.setAttribute('aria-pressed', opsOpen ? 'true' : 'false');
+  }
+  if (btnTitlePanel) {
+    const panelOn = !opsOpen;
+    btnTitlePanel.classList.toggle('active', panelOn);
+    btnTitlePanel.setAttribute('aria-pressed', panelOn ? 'true' : 'false');
   }
 }
 
@@ -697,7 +703,14 @@ async function showView(viewId, options = {}) {
       await showView('ayarlar');
       return;
     }
-    loadWebPath(path !== undefined ? path : lastWebPath);
+    const nextPath = path !== undefined ? path : lastWebPath;
+    const nextUrl = joinUrl(cachedAdminRoot, nextPath || '');
+    const currentSrc = pageWebview ? pageWebview.getAttribute('src') || '' : '';
+    if (currentSrc !== nextUrl) {
+      loadWebPath(nextPath);
+    } else {
+      lastWebPath = nextPath === undefined ? lastWebPath : nextPath;
+    }
     await refreshLoginState();
   }
   syncChromeVisibility();
@@ -849,6 +862,10 @@ function handleDesktopMenuAction(raw, extra) {
     showView('operasyon');
     return true;
   }
+  if (action === 'panel' || action === 'web') {
+    showView('web', { path: lastWebPath || '' });
+    return true;
+  }
   return false;
 }
 
@@ -877,6 +894,14 @@ btnTitleAyarlar.addEventListener('click', (e) => {
   e.stopPropagation();
   toggleSettings();
 });
+
+if (btnTitlePanel) {
+  btnTitlePanel.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    handleDesktopMenuAction('panel');
+  });
+}
 
 if (btnTitleOperasyon) {
   btnTitleOperasyon.addEventListener('click', (e) => {
