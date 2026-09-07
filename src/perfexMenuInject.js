@@ -1,13 +1,13 @@
 /**
  * Perfex admin kenar çubuğuna Desktop Teklif menüsü basar.
- * Haberler / newsfeed gizlenir; tema PR #12 Yeni teklif ve Ayarlar satırları
- * gizlenir (Ayarlar yalnızca Electron başlık çubuğunda). Operasyon bu kartta.
+ * Haberler / newsfeed gizlenir; tema PR #12 Yeni teklif, Operasyon ve
+ * Ayarlar satırları gizlenir (Operasyon + Ayarlar Electron başlık çubuğunda).
  *
- * CARD_VERSION: mevcut #desktop-teklif-perfex-menu (eski innerHTML) her inject
- * ve MutationObserver turunda yeniden yazılır — düğüm duruyor diye atlanmaz.
+ * CARD_VERSION: mevcut #desktop-teklif-perfex-menu (eski Operasyon linki /
+ * staff / Yeni teklif) her inject ve MutationObserver turunda yeniden yazılır.
  */
 
-const CARD_VERSION = 'ops-2';
+const CARD_VERSION = 'title-ops-1';
 
 function escapeHtml(value) {
   return String(value == null ? '' : value)
@@ -67,6 +67,7 @@ function buildPerfexMenuInjectScript(payload) {
       'li.menu-item-desktop_teklif_operasyon',
       'a[href^="desktop-teklif://ayarlar"]',
       'a[href^="desktop-teklif://yeni"]',
+      'a[href^="desktop-teklif://operasyon"]',
       'a[data-desktop-action="ayarlar"]',
       'a[data-desktop-action="yeni"]',
       'a[data-desktop-action="yeni-teklif"]',
@@ -86,13 +87,14 @@ function buildPerfexMenuInjectScript(payload) {
     }
 
     function hrefLooksDesktop(href) {
-      return /desktop-teklif|dt-ayarlar|dt_ayarlar|dt-yeni|mrp_theme\\/desktop/i.test(String(href || ''));
+      return /desktop-teklif|dt-ayarlar|dt_ayarlar|dt-yeni|dt-operasyon|mrp_theme\\/desktop/i.test(String(href || ''));
     }
 
     function hideNewsAndDuplicateSettings() {
       hideSelectors.forEach((sel) => {
         document.querySelectorAll(sel).forEach((el) => {
           if (el.closest && el.closest('#' + MENU_ID)) return;
+          if (el.closest && el.closest('#titlebar, .window-controls, #btnTitleOperasyon')) return;
           el.style.setProperty('display', 'none', 'important');
         });
       });
@@ -103,9 +105,9 @@ function buildPerfexMenuInjectScript(payload) {
         const href = ((li.querySelector && li.querySelector('a')) || li).getAttribute
           ? ((li.querySelector('a') || li).getAttribute('href') || '')
           : '';
-        const action = ((li.querySelector && li.querySelector('[data-desktop-action]')) || {})
-          .getAttribute
-          ? (li.querySelector('[data-desktop-action]').getAttribute('data-desktop-action') || '')
+        const actionEl = li.querySelector && li.querySelector('[data-desktop-action]');
+        const action = actionEl && actionEl.getAttribute
+          ? (actionEl.getAttribute('data-desktop-action') || '')
           : '';
         const isDesktopRow = hrefLooksDesktop(href) || /^(yeni|yeni-teklif|ayarlar|operasyon)$/i.test(action);
         if (label === 'ayarlar' || label === 'settings') {
@@ -134,7 +136,6 @@ function buildPerfexMenuInjectScript(payload) {
         '#' + MENU_ID + ' .dt-section{margin:10px 2px 4px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;opacity:.7;}',
         '#' + MENU_ID + ' a.dt-link{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;color:#e8eef6;text-decoration:none;font-size:13px;}',
         '#' + MENU_ID + ' a.dt-link:hover{background:rgba(255,255,255,.06);}',
-        '#' + MENU_ID + ' a.dt-ops{font-weight:650;background:rgba(31,111,235,.22);}',
         '#' + MENU_ID + ' a.dt-warn{color:#f85149;}',
         '#' + MENU_ID + ' .dt-empty{font-size:12px;opacity:.65;padding:4px 10px;}',
       ].join('');
@@ -162,7 +163,7 @@ function buildPerfexMenuInjectScript(payload) {
       const tasksHtml = (payload.tasks || [])
         .filter((t) => {
           const action = String(t.action || '');
-          return action !== 'yeni' && action !== 'yeni-teklif';
+          return action !== 'yeni' && action !== 'yeni-teklif' && action !== 'operasyon';
         })
         .map((t) => {
           const cls = t.tone === 'err' ? 'dt-link dt-warn' : 'dt-link';
@@ -181,7 +182,6 @@ function buildPerfexMenuInjectScript(payload) {
       return (
         '<div class="dt-card" data-dt-card="' + esc(CARD_VERSION) + '">' +
           (payload.licenseLabel ? '<div class="dt-role">' + esc(payload.licenseLabel) + '</div>' : '') +
-          '<a class="dt-link dt-ops" href="#" data-desktop-action="operasyon">Operasyon</a>' +
           tasksHtml +
           '<p class="dt-section">Son teklifler</p>' +
           historyHtml +
@@ -193,7 +193,7 @@ function buildPerfexMenuInjectScript(payload) {
       if (!root) return true;
       if (root.getAttribute('data-dt-card') !== CARD_VERSION) return true;
       const html = String(root.innerHTML || '');
-      if (!root.querySelector('a[data-desktop-action="operasyon"]')) return true;
+      if (root.querySelector('a[data-desktop-action="operasyon"], a.dt-ops')) return true;
       if (root.querySelector('[class*="dt-user"], [class*="dt-avatar"], #dt-teklif-btn')) return true;
       if (html.indexOf('dt-user') !== -1 || html.indexOf('dt-avatar') !== -1) return true;
       if (/yap[\\u0131i]lacaklar/i.test(html)) return true;
@@ -265,31 +265,35 @@ if (require.main === module) {
       avatar: 'SE',
       tasks: [
         { label: 'JWT girin', action: 'open-settings', tone: 'err' },
+        { label: 'Operasyon', action: 'operasyon' },
         { label: 'Yeni teklif oluşturabilirsiniz', action: 'yeni', tone: 'ok' },
       ],
       history: [{ name: 'T-1', path: '/tmp/x' }],
     })
   );
-  const htmlAt = script.indexOf('root.innerHTML');
-  const htmlChunk = htmlAt >= 0 ? script.slice(htmlAt, htmlAt + 1200) : '';
+  const cardAt = script.indexOf('function cardHtml');
+  const cardChunk = cardAt >= 0 ? script.slice(cardAt, cardAt + 2200) : '';
   const ok =
     script.includes('desktop-teklif-perfex-menu') &&
     script.includes('newsfeed') &&
     script.includes('menu-item-dt-ayarlar') &&
     script.includes('menu-item-desktop_teklif_yeni') &&
+    script.includes('menu-item-desktop_teklif_operasyon') &&
     !script.includes('>Ayarlar<') &&
-    script.includes('data-desktop-action="operasyon"') &&
-    script.includes('>Operasyon<') &&
+    script.includes('a[data-desktop-action="operasyon"]') &&
+    !script.includes('dt-link dt-ops') &&
+    !script.includes('>Operasyon<') &&
     script.includes('data-dt-card') &&
     script.includes('menuNeedsPaint') &&
     script.includes('innerHTML = cardHtml') &&
-    !htmlChunk.includes('class="dt-user"') &&
-    !htmlChunk.includes('class="dt-avatar"') &&
-    !htmlChunk.includes('Yapılacaklar') &&
-    !htmlChunk.includes('id="dt-teklif-btn"') &&
-    !htmlChunk.includes('>Yeni Teklif<') &&
-    !htmlChunk.includes('Yeni teklif oluşturabilirsiniz') &&
-    !/if \\(parent && !document\\.getElementById\\(MENU_ID\\)\\) render\\(\\)/.test(script);
+    script.includes('#dt-teklif-btn') &&
+    !cardChunk.includes('class="dt-user"') &&
+    !cardChunk.includes('class="dt-avatar"') &&
+    !cardChunk.includes('Yapılacaklar') &&
+    !cardChunk.includes('id="dt-teklif-btn"') &&
+    !cardChunk.includes('>Yeni Teklif<') &&
+    !cardChunk.includes('Yeni teklif oluşturabilirsiniz') &&
+    !/if \(parent && !document\.getElementById\(MENU_ID\)\) render\(\)/.test(script);
   if (!ok) {
     console.error('FAIL inject script markers');
     process.exit(1);
