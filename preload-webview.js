@@ -55,6 +55,9 @@ document.addEventListener(
     if (dataAction) {
       event.preventDefault();
       event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === 'function') {
+        event.stopImmediatePropagation();
+      }
       const extra = el.getAttribute('data-desktop-extra');
       sendAction(dataAction, extra);
       return;
@@ -64,6 +67,9 @@ document.addEventListener(
     if (hrefLooksDesktop(href)) {
       event.preventDefault();
       event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === 'function') {
+        event.stopImmediatePropagation();
+      }
       sendNavigate(href);
     }
   },

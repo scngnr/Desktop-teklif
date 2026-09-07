@@ -14,6 +14,22 @@
         <span class="titlebar-brand" id="titlebarBrand">Desktop Teklif</span>
       </div>
       <div class="window-controls">
+        <button type="button" class="win-btn win-ops" id="btnTitleOperasyon" title="Operasyon" aria-label="Operasyon" aria-pressed="false">
+          <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="4" y="4" width="16" height="16" rx="2"></rect>
+            <path d="M8 9h8M8 13h8M8 17h5"></path>
+          </svg>
+          <span class="win-ops-label">Operasyon</span>
+        </button>
+        <button type="button" class="win-btn win-ops win-panel" id="btnTitlePanel" title="Panel" aria-label="Panel" aria-pressed="false">
+          <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="7" height="7" rx="1.2"></rect>
+            <rect x="14" y="3" width="7" height="7" rx="1.2"></rect>
+            <rect x="3" y="14" width="7" height="7" rx="1.2"></rect>
+            <rect x="14" y="14" width="7" height="7" rx="1.2"></rect>
+          </svg>
+          <span class="win-ops-label">Panel</span>
+        </button>
         <button type="button" class="win-btn win-settings" id="btnTitleAyarlar" title="Ayarlar" aria-label="Ayarlar" aria-pressed="false">
           <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="3"></circle>
@@ -51,8 +67,8 @@
             <span class="nav-label">Ayarlar</span>
           </button>
 
-          <p class="nav-section-label">Web (MRP)</p>
-          <button type="button" class="nav-item" data-view="web" data-path="" title="Panel">
+          <p class="nav-section-label" hidden>Web (MRP)</p>
+          <button type="button" class="nav-item" data-view="web" data-path="" title="Panel" hidden>
             <span class="nav-icon" aria-hidden="true">▣</span>
             <span class="nav-label">Panel</span>
           </button>
@@ -67,7 +83,7 @@
           <div class="settings-panel" role="dialog" aria-labelledby="settingsTitle">
           <header class="page-header">
             <h1 id="settingsTitle">Ayarlar</h1>
-            <p class="subtitle" id="settingsHint">API erişimi için Base URL ve JWT token gerekli.</p>
+            <p class="subtitle" id="settingsHint">Base URL ve Firma adı hem Giriş URL’yi (webview) hem REST API kökünü belirler. JWT zorunlu.</p>
           </header>
 
           <form class="settings-form" id="settingsForm">
@@ -81,7 +97,8 @@
               <input type="text" id="inputFirmaAdi" name="firmaAdi" placeholder="ornekfirma" autocomplete="off" spellcheck="false" />
             </label>
 
-            <p class="field-hint" id="girisUrlPreview">Giriş URL: —</p>
+            <p class="field-hint" id="girisUrlPreview">Giriş URL: —
+API: —</p>
 
             <label class="field">
               <span class="field-label">JWT Token</span>
@@ -109,46 +126,36 @@
         <section class="view view-operasyon" id="view-operasyon" hidden>
           <header class="ops-header">
             <div>
-              <h1 id="opsTitle">Operasyon</h1>
-              <p class="subtitle" id="opsSubtitle">Üretim ve teklif operasyonları</p>
+              <p class="ops-kicker">Operasyon konsolu</p>
+              <h1 id="opsTitle">Kabul edilmiş teklifler</h1>
+              <p class="subtitle" id="opsSubtitle">Üretim, satınalma, sevkiyat ve maliyet</p>
             </div>
             <div class="ops-header-actions">
-              <button type="button" class="btn-secondary" id="opsBtnBack" hidden>Liste</button>
+              <button type="button" class="btn-secondary" id="opsBtnBack" hidden>Listeye dön</button>
               <button type="button" class="btn-primary" id="opsBtnRefresh">Yenile</button>
             </div>
           </header>
           <div class="ops-metrics" id="opsMetrics"></div>
-          <div id="opsListPane">
+          <div id="opsListPane" class="ops-list-pane">
             <div class="ops-toolbar">
-              <input type="search" id="opsSearch" placeholder="Ara…" autocomplete="off" spellcheck="false" />
+              <input type="search" id="opsSearch" placeholder="Teklif no, müşteri veya konu ara…" autocomplete="off" spellcheck="false" />
               <div class="ops-chips" id="opsStatusChips">
-                <button type="button" data-value="open" class="active">Açık</button>
-                <button type="button" data-value="accepted">Kabul</button>
-                <button type="button" data-value="all">Tümü</button>
+                <button type="button" data-value="accepted" class="active" title="Kabul edilmiş teklifler">Kabul edilmiş</button>
+                <button type="button" data-value="open" title="Yalnızca açık üretim emri (MO) olan teklifler">Açık</button>
+                <button type="button" data-value="all" title="Tüm teklifler">Tümü</button>
               </div>
               <div class="ops-chips" id="opsScopeChips">
-                <button type="button" data-value="outstanding" class="active">Bekleyen</button>
-                <button type="button" data-value="ids">Yerel teklifler</button>
+                <button type="button" data-value="outstanding" class="active" title="Sunucu teklif listesi">Bekleyen</button>
+                <button type="button" data-value="ids" title="Bu cihazda oluşturulan teklifler">Yerel teklifler</button>
               </div>
             </div>
-            <div class="ops-table-wrap">
-              <table class="ops-table" id="opsTable">
-                <thead>
-                  <tr>
-                    <th>No</th>
-                    <th>Müşteri / konu</th>
-                    <th>Durum</th>
-                    <th>Tarih</th>
-                  </tr>
-                </thead>
-                <tbody id="opsTableBody">
-                  <tr><td colspan="4" class="ops-empty">Yükleniyor…</td></tr>
-                </tbody>
-              </table>
+            <div class="ops-banner" id="opsBanner" hidden></div>
+            <div class="ops-card-grid" id="opsListBody">
+              <div class="ops-state ops-state-loading">Yükleniyor…</div>
             </div>
             <p class="ops-foot" id="opsListFoot"></p>
           </div>
-          <div id="opsDetailPane" class="ops-detail" hidden></div>
+          <div id="opsDetailPane" class="ops-detail ops-workspace" hidden></div>
         </section>
 
         <section class="view view-web" id="view-web">
@@ -198,7 +205,10 @@
 
       <div class="modal-actions">
         <button type="button" class="btn-secondary" id="btnConfirmCancel">Vazgeç</button>
-        <button type="button" class="btn-primary" id="btnConfirmOk">Oluştur</button>
+        <button type="button" class="btn-primary" id="btnConfirmOk">
+          <span class="btn-spinner" hidden aria-hidden="true"></span>
+          <span class="btn-label">Oluştur</span>
+        </button>
       </div>
     </div>
   </div>

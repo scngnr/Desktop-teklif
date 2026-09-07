@@ -148,7 +148,7 @@ function getMrpSession() {
 
 function mrpIdentityUrls() {
   const cfg = config.getPublic();
-  return [cfg.baseUrl, cfg.adminRoot].filter(Boolean);
+  return [cfg.baseUrl, cfg.apiRoot, cfg.adminRoot].filter(Boolean);
 }
 
 async function applyMrpDesktopIdentity() {
@@ -163,7 +163,7 @@ async function applyMrpDesktopIdentity() {
 
 async function isWebLoggedIn() {
   const cfg = config.getPublic();
-  const urls = [cfg.baseUrl, cfg.adminRoot].filter(Boolean);
+  const urls = [cfg.baseUrl, cfg.apiRoot, cfg.adminRoot].filter(Boolean);
   const ses = getMrpSession();
   const seen = new Set();
   const names = [];
