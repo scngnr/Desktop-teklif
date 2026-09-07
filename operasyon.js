@@ -1,18 +1,29 @@
 /**
- * Native Operasyon paneli — JWT REST.
- * Liste: api/v1/mrp/operations/proposals (yoksa 404 metni).
- * Taskbar/WO fallback: api/v1/mrp/work_orders.
+ * Native Operasyon konsolu — JWT REST.
+ * Liste: api/v1/mrp/operations/proposals (404 ise açıklama + work_orders yedek).
+ * Detay: MO, satınalma, sevkiyat, maliyet — yalnızca mevcut api/ uçları.
  */
 (function () {
   const LIMIT = 50;
-  let status = 'open';
+  const TABS = [
+    { id: 'mo', label: "MO'lar" },
+    { id: 'purchased', label: 'Satın alınan ürünler' },
+    { id: 'shipments', label: 'Sevkiyatlar' },
+    { id: 'cost', label: 'En son maliyet hesabı' },
+  ];
+
+  let status = 'accepted';
   let scope = 'outstanding';
   let query = '';
   let offset = 0;
   let selectedId = null;
+  let selectedItem = null;
+  let detailTab = 'mo';
   let pollTimer = null;
   let lastMsgId = 0;
   let needSettingsHandler = null;
+  let warnedOps404 = false;
+  let listSource = 'proposals';
 
   function el(id) {
     return document.getElementById(id);
@@ -33,9 +44,17 @@
     return d.toLocaleString('tr-TR', {
       day: '2-digit',
       month: '2-digit',
+      year: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
     });
+  }
+
+  function fmtMoney(raw) {
+    if (raw == null || raw === '') return '—';
+    const n = Number(String(raw).replace(',', '.'));
+    if (!Number.isFinite(n)) return escapeHtml(raw);
+    return n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
   function toast(msg, kind) {
@@ -71,6 +90,32 @@
     return result.error || result.text || ('HTTP ' + result.status);
   }
 
+  function asArray(json) {
+    if (!json) return [];
+    if (Array.isArray(json)) return json;
+    const keys = [
+      'items',
+      'data',
+      'records',
+      'results',
+      'proposals',
+      'manufacturing_orders',
+      'work_orders',
+      'work_centers',
+      'shipments',
+      'external_shipments',
+      'materials',
+      'products',
+      'purchases',
+    ];
+    for (let i = 0; i < keys.length; i++) {
+      const v = json[keys[i]];
+      if (Array.isArray(v)) return v;
+    }
+    if (json.data && typeof json.data === 'object') return asArray(json.data);
+    return [];
+  }
+
   function stopPoll() {
     if (pollTimer) {
       clearInterval(pollTimer);
@@ -85,19 +130,155 @@
     });
   }
 
-  function renderMetrics(health) {
+  function statusLabel(raw) {
+    const s = String(raw == null ? '' : raw).toLowerCase();
+    if (s === '6' || /accept|kabul|approved/.test(s)) return 'Kabul edilmiş';
+    if (s === '3' || s === 'open' || s === 'açık' || s === 'acik') return 'Açık';
+    if (s === '1' || s === 'draft') return 'Taslak';
+    if (s === '2' || s === 'sent') return 'Gönderildi';
+    if (s === '5' || /declin|red/.test(s)) return 'Reddedildi';
+    return raw ? String(raw) : '—';
+  }
+
+  function isAccepted(item) {
+    const s = String(
+      (item && (item.status || item.status_name || item.proposal_status || item.state)) || ''
+    ).toLowerCase();
+    if (s === '6' || /accept|kabul|approved/.test(s)) return true;
+    if (Number(item && item.status) === 6) return true;
+    return false;
+  }
+
+  function isOpenStatus(item) {
+    const s = String(
+      (item && (item.status || item.status_name || item.proposal_status || item.state)) || ''
+    ).toLowerCase();
+    if (s === '3' || s === 'open' || s === 'açık' || s === 'acik' || s === 'outstanding') return true;
+    if (Number(item && item.status) === 3) return true;
+    return false;
+  }
+
+  function itemId(item) {
+    if (!item) return '';
+    return String(
+      item.id || item.proposal_id || item.manufacturing_id || item.wo_id || item.shipment_id || ''
+    );
+  }
+
+  function itemNumber(item) {
+    if (!item) return '—';
+    return (
+      item.number ||
+      item.proposal_number ||
+      item.mo_number ||
+      item.wo_number ||
+      item.shipment_number ||
+      item.code ||
+      ('#' + (itemId(item) || '—'))
+    );
+  }
+
+  function itemCustomer(item) {
+    if (!item) return '—';
+    return (
+      item.customer ||
+      item.company ||
+      item.client ||
+      item.proposal_to ||
+      item.subject ||
+      item.product ||
+      item.description ||
+      '—'
+    );
+  }
+
+  function matchesProposal(row, id) {
+    if (!row || id == null || id === '') return false;
+    const sid = String(id);
+    const keys = [
+      'proposal_id',
+      'proposalId',
+      'rel_id',
+      'source_id',
+      'origin_id',
+      'teklif_id',
+      'parent_id',
+      'id',
+    ];
+    for (let i = 0; i < keys.length; i++) {
+      if (row[keys[i]] != null && String(row[keys[i]]) === sid) return true;
+    }
+    const origin = String(row.origin || row.reference || row.proposal_number || row.number || '');
+    if (origin && (origin === sid || origin.indexOf(sid) !== -1)) return true;
+    return false;
+  }
+
+  function setBanner(text, kind) {
+    const banner = el('opsBanner');
+    if (!banner) return;
+    if (!text) {
+      banner.hidden = true;
+      banner.textContent = '';
+      banner.className = 'ops-banner';
+      return;
+    }
+    banner.hidden = false;
+    banner.className = 'ops-banner ops-banner-' + (kind || 'info');
+    banner.textContent = text;
+  }
+
+  function stateHtml(kind, title, body) {
+    return (
+      '<div class="ops-state ops-state-' +
+      escapeHtml(kind) +
+      '">' +
+      '<strong>' +
+      escapeHtml(title) +
+      '</strong>' +
+      (body ? '<p>' + escapeHtml(body) + '</p>' : '') +
+      '</div>'
+    );
+  }
+
+  function skeletonCards(n) {
+    let html = '';
+    for (let i = 0; i < n; i++) html += '<div class="ops-card ops-card-skel"></div>';
+    return html;
+  }
+
+  function renderMetrics(health, extras) {
     const host = el('opsMetrics');
     if (!host) return;
-    const ops = (health && (health.ops || health)) || {};
+    const ops = (health && (health.ops || health.metrics || health)) || {};
+    const extra = extras || {};
     const cards = [
-      { key: 'open', label: 'Açık', value: ops.open ?? ops.open_count ?? '—' },
-      { key: 'accepted', label: 'Kabul', value: ops.accepted ?? ops.accepted_count ?? '—' },
-      { key: 'overdue', label: 'Geciken', value: ops.overdue ?? ops.overdue_count ?? '—' },
+      {
+        key: 'accepted',
+        label: 'Kabul edilmiş',
+        value: ops.accepted ?? ops.accepted_count ?? extra.accepted ?? '—',
+      },
+      {
+        key: 'open',
+        label: 'Açık',
+        value: ops.open ?? ops.open_count ?? extra.open ?? '—',
+      },
+      {
+        key: 'overdue',
+        label: 'Geciken',
+        value: ops.overdue ?? ops.overdue_count ?? extra.overdue ?? '—',
+      },
+      {
+        key: 'mo',
+        label: "MO'lar",
+        value: ops.manufacturing_orders ?? ops.mo_count ?? extra.mo ?? '—',
+      },
     ];
     host.innerHTML = cards
       .map(
         (c) =>
-          '<button type="button" class="ops-metric" data-metric="' +
+          '<button type="button" class="ops-metric' +
+          (c.key === status ? ' is-focus' : '') +
+          '" data-metric="' +
           escapeHtml(c.key) +
           '"><span>' +
           escapeHtml(c.label) +
@@ -108,116 +289,118 @@
       .join('');
   }
 
-  function badgesHtml(item) {
-    const bits = [];
-    if (item.status) bits.push('<span class="ops-badge">' + escapeHtml(item.status) + '</span>');
-    if (item.priority) bits.push('<span class="ops-badge">' + escapeHtml(item.priority) + '</span>');
-    return bits.join(' ');
-  }
-
-  function renderList(items, total) {
-    const body = el('opsTableBody');
+  function renderList(items, total, meta) {
+    const body = el('opsListBody');
     const foot = el('opsListFoot');
     if (!body) return;
     const rows = Array.isArray(items) ? items : [];
+    const info = meta || {};
     if (rows.length === 0) {
-      body.innerHTML =
-        '<tr><td colspan="4" class="ops-empty">Kayıt yok</td></tr>';
+      const emptyTitle =
+        status === 'accepted'
+          ? 'Kabul edilmiş teklif yok'
+          : status === 'open'
+            ? 'Açık teklif yok'
+            : 'Kayıt yok';
+      const emptyBody = info.emptyHint
+        ? info.emptyHint
+        : 'Filtreleri değiştirin veya API uçları hazır olduğunda kayıtlar burada görünür.';
+      body.innerHTML = stateHtml('empty', emptyTitle, emptyBody);
     } else {
       body.innerHTML = rows
         .map((item) => {
-          const id = item.id || item.proposal_id || '';
+          const id = itemId(item);
+          const accepted = isAccepted(item);
+          const tone = accepted ? 'ok' : isOpenStatus(item) ? 'open' : 'muted';
           return (
-            '<tr data-id="' +
+            '<article class="ops-card" data-id="' +
             escapeHtml(id) +
+            '" role="button" tabindex="0">' +
+            '<div class="ops-card-top">' +
+            '<span class="ops-badge ops-badge-' +
+            tone +
             '">' +
-            '<td>' +
-            escapeHtml(item.number || item.proposal_number || id) +
-            '</td>' +
-            '<td>' +
-            escapeHtml(item.customer || item.company || item.subject || '—') +
-            '</td>' +
-            '<td>' +
-            badgesHtml(item) +
-            '</td>' +
-            '<td>' +
-            escapeHtml(fmtDate(item.date || item.updated_at || item.created_at)) +
-            '</td>' +
-            '</tr>'
+            escapeHtml(statusLabel(item.status || item.status_name)) +
+            '</span>' +
+            '<time>' +
+            escapeHtml(fmtDate(item.date || item.updated_at || item.created_at || item.date_created)) +
+            '</time>' +
+            '</div>' +
+            '<h3>' +
+            escapeHtml(itemNumber(item)) +
+            '</h3>' +
+            '<p class="ops-card-cust">' +
+            escapeHtml(itemCustomer(item)) +
+            '</p>' +
+            '<div class="ops-card-foot">' +
+            '<span>' +
+            escapeHtml(item.subject && item.customer ? item.subject : item.priority || 'Teklif çalışma alanı') +
+            '</span>' +
+            '<span class="ops-card-go">Detay →</span>' +
+            '</div>' +
+            '</article>'
           );
         })
         .join('');
     }
     if (foot) {
-      foot.textContent = total != null ? total + ' kayıt' : '';
+      const src =
+        info.source === 'work_orders'
+          ? ' · kaynak: iş emirleri'
+          : info.source === 'proposals'
+            ? ' · kaynak: kabul edilmiş teklifler'
+            : '';
+      foot.textContent = (total != null ? total + ' kayıt' : '') + src;
     }
   }
 
-  function woStatus(wo) {
-    return String(wo.status || wo.wo_status || '').toLowerCase();
+  function pickCost(json) {
+    if (!json || typeof json !== 'object') return null;
+    const src = json.cost || json.costing || json.latest_cost || json.last_cost || json;
+    if (!src || typeof src !== 'object') return null;
+    const fields = {
+      material: src.material ?? src.materials ?? src.malzeme ?? src.material_cost,
+      labor: src.labor ?? src.labour ?? src.iscilik ?? src.labor_cost,
+      purchase: src.purchase ?? src.external ?? src.buy ?? src.purchase_cost,
+      shipping: src.shipping ?? src.freight ?? src.sevkiyat ?? src.shipping_cost,
+      overhead: src.overhead ?? src.general ?? src.overhead_cost,
+      total: src.total ?? src.grand_total ?? src.amount ?? src.cost_total,
+      updated: src.updated_at ?? src.date ?? src.calculated_at ?? json.updated_at,
+    };
+    const has = ['material', 'labor', 'purchase', 'shipping', 'overhead', 'total'].some(
+      (k) => fields[k] != null && fields[k] !== ''
+    );
+    return has ? fields : null;
   }
 
-  function materialsHtml(detail) {
-    const mats = detail.materials || detail.items || [];
-    if (!Array.isArray(mats) || mats.length === 0) return '<p class="ops-empty">Malzeme yok</p>';
+  function tableHtml(headers, rows, emptyTitle, emptyBody) {
+    if (!rows || rows.length === 0) {
+      return stateHtml('empty', emptyTitle, emptyBody);
+    }
     return (
-      '<ul class="ops-materials">' +
-      mats
+      '<div class="ops-table-wrap">' +
+      '<table class="ops-table ops-mini"><thead><tr>' +
+      headers.map((h) => '<th>' + escapeHtml(h) + '</th>').join('') +
+      '</tr></thead><tbody>' +
+      rows
         .map(
-          (m) =>
-            '<li>' +
-            escapeHtml(m.description || m.name || m.code || '—') +
-            (m.qty != null ? ' × ' + escapeHtml(m.qty) : '') +
-            '</li>'
+          (cols) =>
+            '<tr>' +
+            cols.map((c) => '<td>' + c + '</td>').join('') +
+            '</tr>'
         )
         .join('') +
-      '</ul>'
+      '</tbody></table></div>'
     );
   }
 
-  function woTable(detail) {
-    const wos = detail.work_orders || detail.wos || [];
-    if (!Array.isArray(wos) || wos.length === 0) return '<p class="ops-empty">İş emri yok</p>';
-    return (
-      '<table class="ops-mini"><thead><tr><th>İş emri</th><th>Durum</th></tr></thead><tbody>' +
-      wos
-        .map(
-          (w) =>
-            '<tr><td>' +
-            escapeHtml(w.number || w.id || '—') +
-            '</td><td>' +
-            escapeHtml(w.status || '—') +
-            '</td></tr>'
-        )
-        .join('') +
-      '</tbody></table>'
+  function sectionUnavailable(title, result) {
+    const code = result && result.status ? 'HTTP ' + result.status : 'yanıt yok';
+    return stateHtml(
+      'unavailable',
+      title,
+      explainError(result) + ' (' + code + '). Bu bölüm API hazır olunca dolar; sahte veri gösterilmez.'
     );
-  }
-
-  function renderDetail(detail) {
-    const pane = el('opsDetailPane');
-    if (!pane || !detail) return;
-    const id = detail.id || selectedId;
-    pane.innerHTML =
-      '<div class="ops-detail-head">' +
-      '<h2>' +
-      escapeHtml(detail.number || detail.proposal_number || ('#' + id)) +
-      '</h2>' +
-      '<p>' +
-      escapeHtml(detail.customer || detail.company || detail.subject || '') +
-      '</p>' +
-      '</div>' +
-      '<div class="ops-detail-actions">' +
-      '<button type="button" data-web="proposal">Teklif</button>' +
-      '<button type="button" data-web="order">Üretim</button>' +
-      '<button type="button" data-web="chat">Sohbet</button>' +
-      '</div>' +
-      '<h3>Malzemeler</h3>' +
-      materialsHtml(detail) +
-      '<h3>İş emirleri</h3>' +
-      woTable(detail) +
-      '<h3>Mesajlar</h3>' +
-      '<div id="opsMessages" class="ops-messages"></div>';
   }
 
   function renderMessages(messages) {
@@ -251,11 +434,12 @@
     if (!result.ok) return;
     const json = result.json || {};
     const items = json.items || json.data || json.messages || [];
-    items.forEach((m) => {
+    const list = Array.isArray(items) ? items : [];
+    list.forEach((m) => {
       const id = Number(m.id || 0);
       if (id > lastMsgId) lastMsgId = id;
     });
-    renderMessages(items);
+    renderMessages(list);
   }
 
   function startPoll() {
@@ -271,22 +455,345 @@
 
   async function loadWorkOrdersFallback() {
     const result = await apiGet('api/v1/mrp/work_orders?limit=500');
-    if (!result.ok) return { items: [], error: explainError(result) };
+    if (!result.ok) return { items: [], error: explainError(result), result };
     const json = result.json || {};
-    const raw = json.data || json.items || json.work_orders || [];
-    const items = (Array.isArray(raw) ? raw : []).map((w) => ({
+    const raw = asArray(json);
+    const items = raw.map((w) => ({
       id: w.id,
       number: w.number || w.wo_number || w.id,
-      customer: w.product || w.description || 'İş emri',
+      customer: w.product || w.description || w.customer || 'İş emri',
       status: w.status,
       date: w.date_created || w.updated_at,
+      subject: 'İş emri (yedek liste)',
+      _raw: w,
     }));
-    return { items, total: items.length, fallback: true };
+    return { items, total: items.length, fallback: true, source: 'work_orders' };
+  }
+
+  function filterByStatus(items) {
+    if (status === 'all') return items;
+    return items.filter((item) => (status === 'accepted' ? isAccepted(item) : isOpenStatus(item)));
+  }
+
+  function setListTitle(text) {
+    const title = el('opsTitle');
+    const sub = el('opsSubtitle');
+    if (title) {
+      title.textContent =
+        status === 'accepted' ? 'Kabul edilmiş teklifler' : status === 'open' ? 'Açık teklifler' : 'Tüm teklifler';
+    }
+    if (sub) sub.textContent = text || 'Üretim, satınalma, sevkiyat ve maliyet';
+  }
+
+  async function probeCollection(paths) {
+    let last = null;
+    for (let i = 0; i < paths.length; i++) {
+      const result = await apiGet(paths[i]);
+      last = result;
+      if (result && result.ok) {
+        return { ok: true, result, items: asArray(result.json), path: paths[i] };
+      }
+      if (result && result.status !== 404) {
+        return { ok: false, result, items: [], path: paths[i] };
+      }
+    }
+    return { ok: false, result: last, items: [], path: paths[paths.length - 1] };
+  }
+
+  async function loadRelatedForProposal(id) {
+    const sid = encodeURIComponent(id);
+    const [moProbe, woProbe, extProbe, shipProbe, costProbe] = await Promise.all([
+      probeCollection([
+        'api/v1/mrp/manufacturing_orders?proposal_id=' + sid + '&limit=500',
+        'api/v1/mrp/manufacturing_orders?rel_id=' + sid + '&limit=500',
+        'api/v1/mrp/manufacturing_orders?limit=500',
+      ]),
+      probeCollection([
+        'api/v1/mrp/work_orders?proposal_id=' + sid + '&limit=500',
+        'api/v1/mrp/work_orders?limit=500',
+      ]),
+      probeCollection([
+        'api/v1/mrp/work_order_external?proposal_id=' + sid + '&limit=500',
+        'api/v1/mrp/work_order_external?limit=500',
+      ]),
+      probeCollection([
+        'api/v1/mrp/external_shipments?proposal_id=' + sid + '&limit=500',
+        'api/v1/mrp/external_shipments?limit=500',
+      ]),
+      probeCollection([
+        'api/v1/mrp/operations/proposals/' + sid + '/cost',
+        'api/v1/mrp/operations/proposals/' + sid + '/costing',
+      ]),
+    ]);
+
+    let mos = moProbe.items || [];
+    if (moProbe.ok && moProbe.path && moProbe.path.indexOf('proposal_id') === -1 && moProbe.path.indexOf('rel_id') === -1) {
+      mos = mos.filter((row) => matchesProposal(row, id));
+    }
+    let wos = woProbe.items || [];
+    if (woProbe.ok && woProbe.path && woProbe.path.indexOf('proposal_id') === -1) {
+      wos = wos.filter((row) => matchesProposal(row, id));
+    }
+    let ext = extProbe.items || [];
+    if (extProbe.ok && extProbe.path && extProbe.path.indexOf('proposal_id') === -1) {
+      ext = ext.filter((row) => matchesProposal(row, id));
+    }
+    let ships = shipProbe.items || [];
+    if (shipProbe.ok && shipProbe.path && shipProbe.path.indexOf('proposal_id') === -1) {
+      ships = ships.filter((row) => matchesProposal(row, id));
+    }
+
+    return {
+      mo: moProbe,
+      mos,
+      wo: woProbe,
+      wos,
+      ext: extProbe,
+      extItems: ext,
+      ship: shipProbe,
+      ships,
+      cost: costProbe,
+    };
+  }
+
+  function purchasedFromDetail(detail) {
+    const bags = [
+      detail && detail.purchases,
+      detail && detail.purchased,
+      detail && detail.purchased_items,
+      detail && detail.materials,
+      detail && detail.items,
+      detail && detail.products,
+    ];
+    for (let i = 0; i < bags.length; i++) {
+      if (Array.isArray(bags[i]) && bags[i].length) return bags[i];
+    }
+    return [];
+  }
+
+  function renderMoPanel(rel) {
+    const hasMo = rel.mo.ok || (rel.mos && rel.mos.length);
+    const hasWo = rel.wo.ok || (rel.wos && rel.wos.length);
+    if (!hasMo && !hasWo) {
+      return sectionUnavailable("MO'lar yüklenemedi", (rel.mo && rel.mo.result) || (rel.wo && rel.wo.result));
+    }
+    const moRows = (rel.mos || []).map((m) => [
+      escapeHtml(itemNumber(m)),
+      escapeHtml(m.product || m.description || m.name || '—'),
+      escapeHtml(statusLabel(m.status || m.state)),
+      escapeHtml(m.qty != null ? m.qty : m.quantity != null ? m.quantity : '—'),
+      escapeHtml(fmtDate(m.date || m.date_start || m.updated_at || m.created_at)),
+    ]);
+    const woRows = (rel.wos || []).map((w) => [
+      escapeHtml(itemNumber(w)),
+      escapeHtml(w.product || w.description || w.name || '—'),
+      escapeHtml(statusLabel(w.status || w.state)),
+      escapeHtml(fmtDate(w.date || w.date_created || w.updated_at)),
+    ]);
+    return (
+      tableHtml(
+        ['MO', 'Ürün', 'Durum', 'Miktar', 'Tarih'],
+        moRows,
+        'Bu teklife bağlı üretim emri yok',
+        'Kabul edilmiş teklif için manufacturing_orders kaydı bulunamadı.'
+      ) +
+      (woRows.length
+        ? '<h3 class="ops-msg-title">İş emirleri</h3>' +
+          tableHtml(
+            ['İş emri', 'Ürün', 'Durum', 'Tarih'],
+            woRows,
+            'İş emri yok',
+            ''
+          )
+        : '')
+    );
+  }
+
+  function renderPurchasedPanel(rel, detail) {
+    const fromDetail = purchasedFromDetail(detail || {});
+    const fromExt = rel.extItems || [];
+    const merged = fromDetail.concat(fromExt);
+    if (!rel.ext.ok && fromDetail.length === 0 && fromExt.length === 0 && rel.ext.result && rel.ext.result.status === 404) {
+      if (fromDetail.length === 0) {
+        return sectionUnavailable('Satın alınan ürünler yüklenemedi', rel.ext.result);
+      }
+    }
+    const rows = merged.map((m) => [
+      escapeHtml(m.description || m.name || m.product || m.code || itemNumber(m)),
+      escapeHtml(m.vendor || m.supplier || m.company || '—'),
+      escapeHtml(m.qty != null ? m.qty : m.quantity != null ? m.quantity : '—'),
+      escapeHtml(m.unit || m.unite || ''),
+      fmtMoney(m.rate != null ? m.rate : m.price != null ? m.price : m.cost),
+    ]);
+    if (merged.length === 0 && rel.ext.ok) {
+      return tableHtml(
+        ['Ürün', 'Tedarikçi', 'Miktar', 'Birim', 'Birim fiyat'],
+        [],
+        'Satın alınan ürün yok',
+        'Bu teklife bağlı dış alım / malzeme satırı dönmedi.'
+      );
+    }
+    if (merged.length === 0) {
+      return sectionUnavailable('Satın alınan ürünler yüklenemedi', rel.ext.result);
+    }
+    return tableHtml(
+      ['Ürün', 'Tedarikçi', 'Miktar', 'Birim', 'Birim fiyat'],
+      rows,
+      'Satın alınan ürün yok',
+      'Bu teklife bağlı dış alım / malzeme satırı dönmedi.'
+    );
+  }
+
+  function renderShipmentsPanel(rel, detail) {
+    const nested = (detail && (detail.shipments || detail.external_shipments)) || [];
+    const list = (rel.ships && rel.ships.length ? rel.ships : nested) || [];
+    if (!rel.ship.ok && list.length === 0) {
+      return sectionUnavailable('Sevkiyatlar yüklenemedi', rel.ship.result);
+    }
+    const rows = list.map((s) => [
+      escapeHtml(itemNumber(s)),
+      escapeHtml(s.destination || s.address || s.customer || s.to || '—'),
+      escapeHtml(statusLabel(s.status || s.state)),
+      escapeHtml(s.carrier || s.method || '—'),
+      escapeHtml(fmtDate(s.date || s.shipped_at || s.updated_at || s.created_at)),
+    ]);
+    return tableHtml(
+      ['Sevkiyat', 'Hedef', 'Durum', 'Taşıma', 'Tarih'],
+      rows,
+      'Sevkiyat kaydı yok',
+      'external_shipments bu teklif için boş döndü veya henüz sevk yok.'
+    );
+  }
+
+  function renderCostPanel(rel, detail) {
+    const fromDetail = pickCost(detail);
+    const fromApi = rel.cost.ok ? pickCost(rel.cost.result && rel.cost.result.json) : null;
+    const cost = fromApi || fromDetail;
+    const note = !rel.cost.ok
+      ? explainError(rel.cost.result) +
+        ' Maliyet satırları yine de hazır; değerler API gelince dolar.'
+      : cost
+        ? 'En son dönen maliyet kalemleri.'
+        : 'Maliyet ucu yanıt verdi ancak hesap satırı yok.';
+
+    const rows = [
+      ['Malzeme', cost && cost.material],
+      ['İşçilik', cost && cost.labor],
+      ['Dış alım / satınalma', cost && cost.purchase],
+      ['Sevkiyat', cost && cost.shipping],
+      ['Genel gider', cost && cost.overhead],
+    ];
+    return (
+      '<div class="ops-cost">' +
+      '<p class="ops-cost-note">' +
+      escapeHtml(note) +
+      (cost && cost.updated ? ' · ' + fmtDate(cost.updated) : '') +
+      '</p>' +
+      '<table class="ops-ledger"><tbody>' +
+      rows
+        .map(
+          (r) =>
+            '<tr><th>' +
+            escapeHtml(r[0]) +
+            '</th><td>' +
+            fmtMoney(r[1]) +
+            '</td></tr>'
+        )
+        .join('') +
+      '<tr class="ops-ledger-total"><th>Toplam</th><td>' +
+      fmtMoney(cost && cost.total) +
+      '</td></tr>' +
+      '</tbody></table></div>'
+    );
+  }
+
+  function workspaceHtml(detail, rel) {
+    const id = (detail && (detail.id || detail.proposal_id)) || selectedId;
+    const number = itemNumber(detail || selectedItem || { id: id });
+    const customer = itemCustomer(detail || selectedItem || {});
+    const st = (detail && (detail.status || detail.status_name)) || (selectedItem && selectedItem.status);
+    const moCount = (rel.mos && rel.mos.length) || 0;
+    const buyCount =
+      purchasedFromDetail(detail || {}).length + ((rel.extItems && rel.extItems.length) || 0);
+    const shipCount = (rel.ships && rel.ships.length) || 0;
+    const cost = pickCost(detail) || (rel.cost.ok ? pickCost(rel.cost.result && rel.cost.result.json) : null);
+
+    const tabs = TABS.map(
+      (t) =>
+        '<button type="button" class="ops-tab' +
+        (detailTab === t.id ? ' active' : '') +
+        '" data-tab="' +
+        t.id +
+        '">' +
+        escapeHtml(t.label) +
+        '</button>'
+    ).join('');
+
+    const panels = {
+      mo: renderMoPanel(rel),
+      purchased: renderPurchasedPanel(rel, detail),
+      shipments: renderShipmentsPanel(rel, detail),
+      cost: renderCostPanel(rel, detail),
+    };
+
+    return (
+      '<div class="ops-ws-head">' +
+      '<div>' +
+      '<p class="ops-kicker">' +
+      escapeHtml(statusLabel(st)) +
+      ' · çalışma alanı</p>' +
+      '<h2>' +
+      escapeHtml(number) +
+      '</h2>' +
+      '<p class="ops-ws-cust">' +
+      escapeHtml(customer) +
+      '</p>' +
+      '</div>' +
+      '<div class="ops-detail-actions">' +
+      '<button type="button" data-web="proposal">Teklif</button>' +
+      '<button type="button" data-web="order">Üretim</button>' +
+      '<button type="button" data-web="chat">Sohbet</button>' +
+      '</div>' +
+      '</div>' +
+      '<div class="ops-ws-metrics">' +
+      '<div class="ops-metric"><span>MO</span><strong>' +
+      escapeHtml(rel.mo.ok || moCount ? String(moCount) : '—') +
+      '</strong></div>' +
+      '<div class="ops-metric"><span>Satınalma</span><strong>' +
+      escapeHtml(buyCount ? String(buyCount) : '—') +
+      '</strong></div>' +
+      '<div class="ops-metric"><span>Sevkiyat</span><strong>' +
+      escapeHtml(rel.ship.ok || shipCount ? String(shipCount) : '—') +
+      '</strong></div>' +
+      '<div class="ops-metric"><span>Son maliyet</span><strong>' +
+      (cost && cost.total != null ? fmtMoney(cost.total) : '—') +
+      '</strong></div>' +
+      '</div>' +
+      '<nav class="ops-tabs" id="opsTabs">' +
+      tabs +
+      '</nav>' +
+      '<div class="ops-tab-panels">' +
+      TABS.map(
+        (t) =>
+          '<section class="ops-tab-panel" data-panel="' +
+          t.id +
+          '"' +
+          (detailTab === t.id ? '' : ' hidden') +
+          '>' +
+          panels[t.id] +
+          '</section>'
+      ).join('') +
+      '</div>' +
+      '<h3 class="ops-msg-title">Mesajlar</h3>' +
+      '<div id="opsMessages" class="ops-messages"></div>'
+    );
   }
 
   async function loadList() {
-    const title = el('opsSubtitle');
-    if (title) title.textContent = 'Yükleniyor…';
+    setListTitle('Yükleniyor…');
+    const body = el('opsListBody');
+    if (body) body.innerHTML = skeletonCards(6);
+    setBanner('');
 
     const healthRes = await apiGet('api/v1/mrp/health');
     renderMetrics(healthRes.ok ? healthRes.json : null);
@@ -298,8 +805,8 @@
         if (h.proposalId) ids.push(h.proposalId);
       });
       if (ids.length === 0) {
-        renderList([], 0);
-        if (title) title.textContent = 'Yerel teklif geçmişi boş';
+        renderList([], 0, { emptyHint: 'Yerel teklif geçmişi boş.' });
+        setListTitle('Yerel teklif geçmişi boş');
         return;
       }
     }
@@ -321,47 +828,93 @@
         needSettingsHandler();
       }
       const fallback = await loadWorkOrdersFallback();
+      listSource = fallback.source || 'work_orders';
+      const msg = explainError(result);
+      setBanner(msg + (fallback.items && fallback.items.length ? ' İş emirleri yedek listesi gösteriliyor.' : ''), 'warn');
       if (fallback.items && fallback.items.length) {
-        renderList(fallback.items, fallback.total);
-        if (title) title.textContent = 'İş emirleri (operasyon ucu yok)';
-        toast(explainError(result), 'warn');
+        let items = fallback.items;
+        if (status !== 'all') {
+          const filtered = filterByStatus(items);
+          if (filtered.length) items = filtered;
+        }
+        renderList(items, items.length, { source: 'work_orders' });
+        setListTitle('İş emirleri (operasyon ucu yok)');
+        if (!warnedOps404) {
+          toast(msg, 'warn');
+          warnedOps404 = true;
+        }
         return;
       }
-      renderList([], 0);
-      if (title) title.textContent = explainError(result);
-      toast(explainError(result), 'err');
+      renderList([], 0, { emptyHint: msg });
+      setListTitle(msg);
+      toast(msg, 'err');
       return;
     }
+    listSource = 'proposals';
     const json = result.json || {};
-    const items = json.items || json.data || [];
+    let items = json.items || json.data || [];
+    if (!Array.isArray(items)) items = asArray(json);
+    if (status !== 'all') {
+      const filtered = filterByStatus(items);
+      if (filtered.length !== items.length) items = filtered;
+    }
     const total = json.total != null ? json.total : items.length;
-    renderList(items, total);
+    renderList(items, total, { source: 'proposals' });
     if (json.health) renderMetrics({ ops: json.health });
-    if (title) title.textContent = total + ' operasyon kaydı';
+    setListTitle(total + ' kayıt · tıklayınca MO / satınalma / sevkiyat / maliyet');
   }
 
   async function openDetail(id) {
     selectedId = id;
     lastMsgId = 0;
+    detailTab = 'mo';
     el('opsListPane').hidden = true;
     el('opsDetailPane').hidden = false;
     el('opsBtnBack').hidden = false;
-    const result = await apiGet(
+    if (el('opsMetrics')) el('opsMetrics').hidden = true;
+    setListTitle('Teklif çalışma alanı');
+    el('opsSubtitle').textContent = 'MO, satınalma, sevkiyat ve maliyet';
+    el('opsDetailPane').innerHTML =
+      '<div class="ops-state ops-state-loading">Çalışma alanı yükleniyor…</div>';
+
+    const detailRes = await apiGet(
       'api/v1/mrp/operations/proposals/' + encodeURIComponent(id)
     );
-    if (!result.ok) {
-      el('opsDetailPane').innerHTML =
-        '<p class="ops-empty">' + escapeHtml(explainError(result)) + '</p>';
-      toast(explainError(result), 'err');
-      return;
+    let detail = selectedItem || { id: id };
+    if (detailRes.ok) {
+      detail = (detailRes.json && (detailRes.json.data || detailRes.json.item || detailRes.json)) || detail;
+    } else if (detailRes.status === 404) {
+      el('opsDetailPane').innerHTML = '';
     }
-    renderDetail(result.json && (result.json.data || result.json.item || result.json));
+
+    const rel = await loadRelatedForProposal(id);
+    if (!detailRes.ok && detailRes.status !== 404) {
+      toast(explainError(detailRes), 'warn');
+    } else if (!detailRes.ok) {
+      detail = Object.assign({ id: id }, selectedItem || {});
+    }
+
+    el('opsDetailPane').innerHTML = workspaceHtml(detail, rel);
+    if (!detailRes.ok) {
+      const host = el('opsDetailPane');
+      const note = document.createElement('p');
+      note.className = 'ops-banner ops-banner-warn';
+      note.textContent =
+        explainError(detailRes) + ' Bölümler bilinen MRP uçlarından (MO, WO, sevkiyat) doldurulur.';
+      if (host.firstChild) host.insertBefore(note, host.firstChild);
+      else host.appendChild(note);
+    }
     await loadMessages();
     startPoll();
   }
 
   function openWeb(kind) {
-    if (!window.OperasyonView.openWebPath || !selectedId) return;
+    if (!window.OperasyonView.openWebPath) return;
+    if (kind === 'health') {
+      window.OperasyonView.openWebPath('manufacturing/ops_health');
+      return;
+    }
+    if (!selectedId) return;
     if (kind === 'proposal') {
       window.OperasyonView.openWebPath('proposals/list_proposals/' + selectedId);
     } else if (kind === 'order') {
@@ -373,6 +926,16 @@
     } else if (kind === 'health') {
       window.OperasyonView.openWebPath('manufacturing/ops_health');
     }
+  }
+
+  function showListPane() {
+    stopPoll();
+    selectedId = null;
+    selectedItem = null;
+    if (el('opsDetailPane')) el('opsDetailPane').hidden = true;
+    if (el('opsListPane')) el('opsListPane').hidden = false;
+    if (el('opsBtnBack')) el('opsBtnBack').hidden = true;
+    if (el('opsMetrics')) el('opsMetrics').hidden = false;
   }
 
   function bind() {
@@ -392,17 +955,17 @@
     const refresh = el('opsBtnRefresh');
     if (refresh && !refresh.dataset.bound) {
       refresh.dataset.bound = '1';
-      refresh.addEventListener('click', () => loadList());
+      refresh.addEventListener('click', () => {
+        if (selectedId) openDetail(selectedId);
+        else loadList();
+      });
     }
     const back = el('opsBtnBack');
     if (back && !back.dataset.bound) {
       back.dataset.bound = '1';
       back.addEventListener('click', () => {
-        stopPoll();
-        selectedId = null;
-        el('opsDetailPane').hidden = true;
-        el('opsListPane').hidden = false;
-        back.hidden = true;
+        showListPane();
+        loadList();
       });
     }
     const statusChips = el('opsStatusChips');
@@ -429,30 +992,61 @@
         loadList();
       });
     }
-    const table = el('opsTable');
-    if (table && !table.dataset.bound) {
-      table.dataset.bound = '1';
-      table.addEventListener('click', (e) => {
-        const row = e.target.closest('tr[data-id]');
-        if (!row) return;
-        openDetail(row.getAttribute('data-id'));
+    const list = el('opsListBody');
+    if (list && !list.dataset.bound) {
+      list.dataset.bound = '1';
+      list.addEventListener('click', (e) => {
+        const card = e.target.closest('[data-id]');
+        if (!card) return;
+        const id = card.getAttribute('data-id');
+        selectedItem = {
+          id: id,
+          number: (card.querySelector('h3') && card.querySelector('h3').textContent) || id,
+          customer: (card.querySelector('.ops-card-cust') && card.querySelector('.ops-card-cust').textContent) || '',
+        };
+        openDetail(id);
+      });
+      list.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        const card = e.target.closest('[data-id]');
+        if (!card) return;
+        e.preventDefault();
+        card.click();
       });
     }
     const metrics = el('opsMetrics');
     if (metrics && !metrics.dataset.bound) {
       metrics.dataset.bound = '1';
       metrics.addEventListener('click', (e) => {
-        if (!e.target.closest('.ops-metric')) return;
-        openWeb('health');
+        const btn = e.target.closest('.ops-metric');
+        if (!btn) return;
+        const metric = btn.getAttribute('data-metric');
+        if (metric === 'accepted' || metric === 'open') {
+          status = metric;
+          setChips(el('opsStatusChips'), status);
+          offset = 0;
+          loadList();
+        }
       });
     }
     const detail = el('opsDetailPane');
     if (detail && !detail.dataset.bound) {
       detail.dataset.bound = '1';
       detail.addEventListener('click', (e) => {
-        const btn = e.target.closest('[data-web]');
-        if (!btn) return;
-        openWeb(btn.getAttribute('data-web'));
+        const tab = e.target.closest('[data-tab]');
+        if (tab) {
+          detailTab = tab.getAttribute('data-tab');
+          detail.querySelectorAll('.ops-tab').forEach((b) => {
+            b.classList.toggle('active', b.getAttribute('data-tab') === detailTab);
+          });
+          detail.querySelectorAll('.ops-tab-panel').forEach((p) => {
+            p.hidden = p.getAttribute('data-panel') !== detailTab;
+          });
+          return;
+        }
+        const webBtn = e.target.closest('[data-web]');
+        if (!webBtn) return;
+        openWeb(webBtn.getAttribute('data-web'));
       });
     }
   }
@@ -460,11 +1054,10 @@
   window.OperasyonView = {
     async show() {
       bind();
+      status = status || 'accepted';
       setChips(el('opsStatusChips'), status);
       setChips(el('opsScopeChips'), scope);
-      el('opsListPane').hidden = false;
-      el('opsDetailPane').hidden = true;
-      if (el('opsBtnBack')) el('opsBtnBack').hidden = true;
+      showListPane();
       await loadHistory();
       await loadList();
     },

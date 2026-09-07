@@ -449,7 +449,8 @@ button, input {
 }
 
 .win-settings.active,
-.win-ops.active {
+.win-ops.active,
+.win-panel.active {
   background: rgba(31, 111, 235, 0.28);
   color: var(--text);
 }
@@ -886,13 +887,24 @@ button:disabled {
   z-index: 20;
   display: flex;
   flex-direction: column;
-  padding: 20px 22px 16px;
+  padding: 18px 22px 14px;
   overflow: hidden;
-  background: var(--bg);
+  background:
+    radial-gradient(720px 280px at 88% -10%, rgba(31, 111, 235, 0.16), transparent 60%),
+    var(--bg);
 }
 
 .view-operasyon[hidden] {
   display: none !important;
+}
+
+.ops-kicker {
+  margin: 0 0 4px;
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 650;
 }
 
 .ops-header {
@@ -900,12 +912,19 @@ button:disabled {
   justify-content: space-between;
   align-items: flex-start;
   gap: 16px;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
 }
 
 .ops-header h1 {
-  font-size: 1.35rem;
+  font-size: 1.32rem;
   font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.ops-header .subtitle {
+  color: var(--muted);
+  font-size: 0.82rem;
+  margin-top: 4px;
 }
 
 .ops-header-actions {
@@ -913,33 +932,62 @@ button:disabled {
   gap: 8px;
 }
 
-.ops-metrics {
-  display: flex;
+.ops-metrics,
+.ops-ws-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
   margin-bottom: 12px;
+}
+
+.ops-metrics[hidden],
+.ops-list-pane[hidden],
+.ops-detail[hidden],
+.ops-workspace[hidden],
+.ops-banner[hidden],
+.ops-tab-panel[hidden] {
+  display: none !important;
 }
 
 .ops-metric {
   flex: 1;
   text-align: left;
   border: 1px solid var(--border);
-  background: var(--surface);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 70%), var(--surface);
   color: var(--text);
   border-radius: 10px;
   padding: 10px 12px;
   cursor: pointer;
 }
 
+.ops-metric.is-focus {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px rgba(31, 111, 235, 0.35);
+}
+
+.ops-ws-metrics .ops-metric {
+  cursor: default;
+}
+
 .ops-metric span {
   display: block;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   color: var(--muted);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
 }
 
 .ops-metric strong {
-  font-size: 1.2rem;
+  font-size: 1.18rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.ops-list-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .ops-toolbar {
@@ -952,7 +1000,7 @@ button:disabled {
 
 .ops-toolbar input {
   flex: 1;
-  min-width: 160px;
+  min-width: 180px;
   background: var(--surface);
   border: 1px solid var(--border);
   color: var(--text);
@@ -981,8 +1029,102 @@ button:disabled {
   background: rgba(31, 111, 235, 0.18);
 }
 
-.ops-table-wrap {
+.ops-banner {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-bottom: 10px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.ops-banner-warn {
+  border-color: rgba(210, 153, 34, 0.45);
+  color: #e3c56b;
+  background: rgba(210, 153, 34, 0.08);
+}
+
+.ops-card-grid {
   flex: 1;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+  align-content: start;
+  padding: 2px 2px 8px;
+}
+
+.ops-card {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 12px;
+  padding: 12px 13px 11px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 124px;
+  transition: border-color 0.12s, background 0.12s, transform 0.12s;
+}
+
+.ops-card:hover,
+.ops-card:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: rgba(31, 111, 235, 0.08);
+}
+
+.ops-card-skel {
+  min-height: 124px;
+  cursor: default;
+  background: linear-gradient(90deg, var(--surface) 0%, #1b2636 50%, var(--surface) 100%);
+  background-size: 200% 100%;
+  animation: ops-skel 1.2s ease infinite;
+}
+
+@keyframes ops-skel {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+.ops-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.ops-card-top time,
+.ops-card-foot {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.ops-card h3 {
+  font-size: 1.02rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.ops-card-cust {
+  font-size: 0.84rem;
+  color: var(--text);
+  opacity: 0.9;
+}
+
+.ops-card-foot {
+  display: flex;
+  justify-content: space-between;
+  margin-top: auto;
+}
+
+.ops-card-go {
+  color: var(--accent-hover);
+  font-weight: 650;
+}
+
+.ops-table-wrap {
   overflow: auto;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -1001,10 +1143,6 @@ button:disabled {
   border-bottom: 1px solid var(--border);
 }
 
-.ops-table tbody tr {
-  cursor: pointer;
-}
-
 .ops-table tbody tr:hover {
   background: rgba(255, 255, 255, 0.04);
 }
@@ -1012,6 +1150,34 @@ button:disabled {
 .ops-empty {
   color: var(--muted);
   padding: 16px;
+}
+
+.ops-state {
+  grid-column: 1 / -1;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  padding: 28px 20px;
+  text-align: center;
+  color: var(--muted);
+  background: rgba(21, 28, 39, 0.55);
+}
+
+.ops-state strong {
+  display: block;
+  color: var(--text);
+  font-size: 0.95rem;
+  margin-bottom: 6px;
+}
+
+.ops-state p {
+  font-size: 0.82rem;
+  max-width: 42rem;
+  margin: 0 auto;
+  line-height: 1.45;
+}
+
+.ops-state-loading {
+  border-style: solid;
 }
 
 .ops-foot {
@@ -1028,19 +1194,54 @@ button:disabled {
   font-size: 0.72rem;
 }
 
-.ops-detail {
+.ops-badge-ok {
+  background: rgba(63, 185, 80, 0.18);
+  color: #7ee787;
+}
+
+.ops-badge-open {
+  background: rgba(31, 111, 235, 0.22);
+  color: #79b8ff;
+}
+
+.ops-badge-muted {
+  background: rgba(139, 156, 179, 0.16);
+  color: var(--muted);
+}
+
+.ops-detail,
+.ops-workspace {
   flex: 1;
+  min-height: 0;
   overflow: auto;
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 16px;
+  border-radius: 12px;
+  padding: 16px 16px 18px;
   background: var(--surface);
+}
+
+.ops-ws-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.ops-ws-head h2 {
+  font-size: 1.28rem;
+  letter-spacing: -0.02em;
+}
+
+.ops-ws-cust {
+  color: var(--muted);
+  margin-top: 4px;
 }
 
 .ops-detail-actions {
   display: flex;
   gap: 8px;
-  margin: 12px 0;
+  flex-wrap: wrap;
 }
 
 .ops-detail-actions button {
@@ -1050,6 +1251,79 @@ button:disabled {
   border-radius: 8px;
   padding: 6px 10px;
   cursor: pointer;
+}
+
+.ops-detail-actions button:hover {
+  border-color: var(--accent);
+  background: rgba(31, 111, 235, 0.12);
+}
+
+.ops-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  margin: 4px 0 12px;
+}
+
+.ops-tab {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  padding: 8px 12px 10px;
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 600;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.ops-tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.ops-tab-panel {
+  min-height: 160px;
+}
+
+.ops-cost-note {
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin-bottom: 10px;
+  line-height: 1.4;
+}
+
+.ops-ledger {
+  width: min(420px, 100%);
+  border-collapse: collapse;
+}
+
+.ops-ledger th,
+.ops-ledger td {
+  text-align: left;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.86rem;
+}
+
+.ops-ledger td {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.ops-ledger-total th,
+.ops-ledger-total td {
+  font-weight: 700;
+  border-bottom: none;
+  padding-top: 12px;
+}
+
+.ops-msg-title {
+  margin: 18px 0 8px;
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 
 .ops-messages .ops-msg {
@@ -1068,4 +1342,11 @@ button:disabled {
   padding: 6px 8px;
   border-bottom: 1px solid var(--border);
   text-align: left;
+}
+
+@media (max-width: 860px) {
+  .ops-metrics,
+  .ops-ws-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }

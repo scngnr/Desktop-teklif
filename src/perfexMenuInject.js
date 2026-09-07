@@ -7,7 +7,7 @@
  * staff / Yeni teklif) her inject ve MutationObserver turunda yeniden yazılır.
  */
 
-const CARD_VERSION = 'title-ops-1';
+const CARD_VERSION = 'title-ops-panel-1';
 
 function escapeHtml(value) {
   return String(value == null ? '' : value)
@@ -94,7 +94,7 @@ function buildPerfexMenuInjectScript(payload) {
       hideSelectors.forEach((sel) => {
         document.querySelectorAll(sel).forEach((el) => {
           if (el.closest && el.closest('#' + MENU_ID)) return;
-          if (el.closest && el.closest('#titlebar, .window-controls, #btnTitleOperasyon')) return;
+          if (el.closest && el.closest('#titlebar, .window-controls, #btnTitleOperasyon, #btnTitlePanel')) return;
           el.style.setProperty('display', 'none', 'important');
         });
       });
@@ -283,7 +283,8 @@ if (require.main === module) {
     script.includes('a[data-desktop-action="operasyon"]') &&
     !script.includes('dt-link dt-ops') &&
     !script.includes('>Operasyon<') &&
-    script.includes('data-dt-card') &&
+    script.includes('#btnTitlePanel') &&
+    script.includes('title-ops-panel-1') &&
     script.includes('menuNeedsPaint') &&
     script.includes('innerHTML = cardHtml') &&
     script.includes('#dt-teklif-btn') &&
