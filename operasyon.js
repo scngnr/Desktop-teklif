@@ -155,13 +155,14 @@
 
   function unwrapRecords(json) {
     if (!json) return [];
-    if (Array.isArray(json)) return json.filter(isRecord);
+    if (Array.isArray(json)) return json.filter((row) => row && typeof row === 'object');
+    if (typeof json !== 'object') return [];
     if (json.status === false) return [];
-    const arr = asArray(json);
-    if (arr.length) return arr.filter((row) => row && typeof row === 'object');
+    // Tekil teklif {data:{id, items:[...]}} satır dizisi sanılmasın.
+    if (Array.isArray(json.data)) return json.data.filter((row) => row && typeof row === 'object');
     if (json.data && isRecord(json.data)) return [json.data];
     if (isRecord(json)) return [json];
-    return [];
+    return asArray(json).filter((row) => row && typeof row === 'object');
   }
 
   function unwrapOne(json, id) {
