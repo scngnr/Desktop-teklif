@@ -1,9 +1,12 @@
 /**
  * Native Operasyon konsolu — JWT REST.
- * İstekler teklifApp.apiRequest üzerinden gider; kök Giriş URL'den türetilir
- * (firma set: {base}/{firma}/ps/api/…, firma boş: {base}/api/…).
- * Liste: api/v1/mrp/operations/proposals (404 ise açıklama + work_orders yedek).
- * Detay: MO, satınalma, sevkiyat, maliyet — yalnızca mevcut api/ uçları.
+ * İstekler teklifApp.apiRequest (src/mrpApi.js) ile gider; kök ayarlardaki
+ * Base URL / Giriş URL’den türetilir (host sabitlenmez).
+ * Liste: GET api/teklif (yoksa GET api/proposals).
+ * Detay: GET api/teklif/{id} veya GET api/proposals/{id}.
+ * MO / WO / sevkiyat: api/mrp/manufacturing_orders, work_orders, external_shipments.
+ * Satırlar: teklif kalemleri + api/product + api/bom.
+ * Maliyet: ayrı maliyet ucu yok; satır / ürün / BOM alanlarından defter (uydurma toplam yok).
  */
 (function () {
   const LIMIT = 50;
@@ -22,10 +25,10 @@
   let selectedItem = null;
   let detailTab = 'mo';
   let pollTimer = null;
-  let lastMsgId = 0;
   let needSettingsHandler = null;
-  let warnedOps404 = false;
-  let listSource = 'proposals';
+  let listSource = 'teklif';
+  let cachedBaseUrl = '';
+  let lastListItems = [];
 
   function el(id) {
     return document.getElementById(id);
@@ -81,10 +84,22 @@
     return s ? '?' + s : '';
   }
 
+  async function refreshBaseUrl() {
+    cachedBaseUrl = '';
+    if (!window.teklifApp || !window.teklifApp.getConfig) return '';
+    try {
+      const cfg = await window.teklifApp.getConfig();
+      cachedBaseUrl = String((cfg && (cfg.apiRoot || cfg.baseUrl)) || '').replace(/\/+$/, '');
+    } catch {
+      cachedBaseUrl = '';
+    }
+    return cachedBaseUrl;
+  }
+
   function explainError(result) {
     if (!result) return 'İstek başarısız.';
     if (result.status === 404) {
-      return 'Üretim / operasyon ucu yok (modül kapalı veya eski API).';
+      return 'İstenen API ucu yok (modül kapalı veya yol tanınmıyor).';
     }
     if (result.status === 401 || result.status === 403) {
       return 'Yetki yok veya JWT geçersiz.';
@@ -101,6 +116,9 @@
       'records',
       'results',
       'proposals',
+      'teklif',
+      'teklifs',
+      'quotes',
       'manufacturing_orders',
       'work_orders',
       'work_centers',
@@ -109,6 +127,10 @@
       'materials',
       'products',
       'purchases',
+      'boms',
+      'bom',
+      'lines',
+      'newitems',
     ];
     for (let i = 0; i < keys.length; i++) {
       const v = json[keys[i]];
@@ -116,6 +138,39 @@
     }
     if (json.data && typeof json.data === 'object') return asArray(json.data);
     return [];
+  }
+
+  function isRecord(obj) {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return false;
+    if (obj.status === false) return false;
+    return !!(
+      obj.id ||
+      obj.proposal_id ||
+      obj.teklif_id ||
+      obj.subject ||
+      obj.number ||
+      obj.proposal_number
+    );
+  }
+
+  function unwrapRecords(json) {
+    if (!json) return [];
+    if (Array.isArray(json)) return json.filter(isRecord);
+    if (json.status === false) return [];
+    const arr = asArray(json);
+    if (arr.length) return arr.filter((row) => row && typeof row === 'object');
+    if (json.data && isRecord(json.data)) return [json.data];
+    if (isRecord(json)) return [json];
+    return [];
+  }
+
+  function unwrapOne(json, id) {
+    const rows = unwrapRecords(json);
+    if (!rows.length) return null;
+    if (id == null || id === '') return rows[0];
+    const sid = String(id);
+    const hit = rows.find((row) => String(itemId(row)) === sid);
+    return hit || (rows.length === 1 ? rows[0] : null);
   }
 
   function stopPoll() {
@@ -138,6 +193,7 @@
     if (s === '3' || s === 'open' || s === 'açık' || s === 'acik') return 'Açık';
     if (s === '1' || s === 'draft') return 'Taslak';
     if (s === '2' || s === 'sent') return 'Gönderildi';
+    if (s === '4' || /revis/.test(s)) return 'Revize';
     if (s === '5' || /declin|red/.test(s)) return 'Reddedildi';
     return raw ? String(raw) : '—';
   }
@@ -160,10 +216,21 @@
     return false;
   }
 
+  function isOverdue(item) {
+    const till = item && (item.open_till || item.date_end || item.due_date);
+    if (!till) return false;
+    const d = new Date(till);
+    if (Number.isNaN(d.getTime())) return false;
+    if (isAccepted(item)) return false;
+    const end = new Date(d);
+    end.setHours(23, 59, 59, 999);
+    return end.getTime() < Date.now();
+  }
+
   function itemId(item) {
     if (!item) return '';
     return String(
-      item.id || item.proposal_id || item.manufacturing_id || item.wo_id || item.shipment_id || ''
+      item.id || item.proposal_id || item.teklif_id || item.manufacturing_id || item.wo_id || item.shipment_id || ''
     );
   }
 
@@ -172,10 +239,13 @@
     return (
       item.number ||
       item.proposal_number ||
+      item.formatted_number ||
+      item.teklif_no ||
       item.mo_number ||
       item.wo_number ||
       item.shipment_number ||
       item.code ||
+      item.subject ||
       ('#' + (itemId(item) || '—'))
     );
   }
@@ -187,14 +257,31 @@
       item.company ||
       item.client ||
       item.proposal_to ||
-      item.subject ||
-      item.product ||
-      item.description ||
+      item.client_company ||
+      item.rel_name ||
       '—'
     );
   }
 
-  function matchesProposal(row, id) {
+  function hasRelationField(row) {
+    if (!row || typeof row !== 'object') return false;
+    const keys = [
+      'proposal_id',
+      'proposalId',
+      'rel_id',
+      'source_id',
+      'origin_id',
+      'teklif_id',
+      'parent_id',
+      'origin',
+      'reference',
+      'proposal_number',
+      'teklif_no',
+    ];
+    return keys.some((k) => row[k] != null && String(row[k]).trim() !== '');
+  }
+
+  function matchesProposal(row, id, hint) {
     if (!row || id == null || id === '') return false;
     const sid = String(id);
     const keys = [
@@ -205,14 +292,35 @@
       'origin_id',
       'teklif_id',
       'parent_id',
-      'id',
     ];
     for (let i = 0; i < keys.length; i++) {
       if (row[keys[i]] != null && String(row[keys[i]]) === sid) return true;
     }
-    const origin = String(row.origin || row.reference || row.proposal_number || row.number || '');
-    if (origin && (origin === sid || origin.indexOf(sid) !== -1)) return true;
+    const number = hint ? String(itemNumber(hint)) : '';
+    const refs = [row.origin, row.reference, row.proposal_number, row.teklif_no, row.source];
+    for (let i = 0; i < refs.length; i++) {
+      if (refs[i] == null || refs[i] === '') continue;
+      const s = String(refs[i]);
+      if (s === sid) return true;
+      if (number && number !== '—' && (s === number || s.indexOf(number) !== -1)) return true;
+    }
     return false;
+  }
+
+  function filterRelated(rows, id, hint, extraIds) {
+    const list = Array.isArray(rows) ? rows : [];
+    if (!list.length) return [];
+    const extras = extraIds || new Set();
+    const related = list.filter((row) => {
+      if (matchesProposal(row, id, hint)) return true;
+      const wo = row.work_order_id || row.wo_id || row.workorder_id;
+      const mo = row.manufacturing_id || row.mo_id || row.manufacturing_order_id;
+      if (wo != null && extras.has('wo:' + String(wo))) return true;
+      if (mo != null && extras.has('mo:' + String(mo))) return true;
+      return false;
+    });
+    if (list.some(hasRelationField) || extras.size) return related;
+    return [];
   }
 
   function setBanner(text, kind) {
@@ -291,6 +399,13 @@
       .join('');
   }
 
+  function sourceLabel(source) {
+    if (source === 'teklif') return ' · kaynak: api/teklif';
+    if (source === 'proposals') return ' · kaynak: api/proposals';
+    if (source === 'search') return ' · kaynak: arama';
+    return '';
+  }
+
   function renderList(items, total, meta) {
     const body = el('opsListBody');
     const foot = el('opsListFoot');
@@ -314,6 +429,7 @@
           const id = itemId(item);
           const accepted = isAccepted(item);
           const tone = accepted ? 'ok' : isOpenStatus(item) ? 'open' : 'muted';
+          const subject = item.subject && itemCustomer(item) !== item.subject ? item.subject : item.priority || 'Teklif çalışma alanı';
           return (
             '<article class="ops-card" data-id="' +
             escapeHtml(id) +
@@ -325,7 +441,7 @@
             escapeHtml(statusLabel(item.status || item.status_name)) +
             '</span>' +
             '<time>' +
-            escapeHtml(fmtDate(item.date || item.updated_at || item.created_at || item.date_created)) +
+            escapeHtml(fmtDate(item.date || item.updated_at || item.created_at || item.datecreated || item.acceptance_date)) +
             '</time>' +
             '</div>' +
             '<h3>' +
@@ -336,7 +452,7 @@
             '</p>' +
             '<div class="ops-card-foot">' +
             '<span>' +
-            escapeHtml(item.subject && item.customer ? item.subject : item.priority || 'Teklif çalışma alanı') +
+            escapeHtml(subject) +
             '</span>' +
             '<span class="ops-card-go">Detay →</span>' +
             '</div>' +
@@ -346,14 +462,20 @@
         .join('');
     }
     if (foot) {
-      const src =
-        info.source === 'work_orders'
-          ? ' · kaynak: iş emirleri'
-          : info.source === 'proposals'
-            ? ' · kaynak: kabul edilmiş teklifler'
-            : '';
-      foot.textContent = (total != null ? total + ' kayıt' : '') + src;
+      const host = cachedBaseUrl ? ' · ' + cachedBaseUrl : '';
+      foot.textContent = (total != null ? total + ' kayıt' : '') + sourceLabel(info.source) + host;
     }
+  }
+
+  function numField(obj, keys) {
+    if (!obj) return null;
+    for (let i = 0; i < keys.length; i++) {
+      const v = obj[keys[i]];
+      if (v == null || v === '') continue;
+      const n = Number(String(v).replace(',', '.'));
+      if (Number.isFinite(n)) return n;
+    }
+    return null;
   }
 
   function pickCost(json) {
@@ -405,76 +527,29 @@
     );
   }
 
-  function renderMessages(messages) {
-    const host = el('opsMessages');
-    if (!host) return;
-    const list = Array.isArray(messages) ? messages : [];
-    if (list.length === 0) {
-      host.innerHTML = '<p class="ops-empty">Mesaj yok</p>';
-      return;
-    }
-    host.innerHTML = list
-      .map(
-        (m) =>
-          '<div class="ops-msg"><strong>' +
-          escapeHtml(m.user || m.staff || '—') +
-          '</strong> <span>' +
-          escapeHtml(fmtDate(m.created_at || m.date)) +
-          '</span><p>' +
-          escapeHtml(m.message || m.body || '') +
-          '</p></div>'
-      )
-      .join('');
-  }
-
-  async function loadMessages() {
-    if (!selectedId) return;
-    const qs = queryString({ after_id: lastMsgId || undefined, limit: 50 });
-    const result = await apiGet(
-      'api/v1/mrp/operations/proposals/' + encodeURIComponent(selectedId) + '/messages' + qs
-    );
-    if (!result.ok) return;
-    const json = result.json || {};
-    const items = json.items || json.data || json.messages || [];
-    const list = Array.isArray(items) ? items : [];
-    list.forEach((m) => {
-      const id = Number(m.id || 0);
-      if (id > lastMsgId) lastMsgId = id;
-    });
-    renderMessages(list);
-  }
-
-  function startPoll() {
-    stopPoll();
-    pollTimer = setInterval(loadMessages, 15000);
-  }
-
   async function loadHistory() {
     if (!window.teklifApp || !window.teklifApp.listHistory) return [];
     const result = await window.teklifApp.listHistory();
     return (result && result.items) || [];
   }
 
-  async function loadWorkOrdersFallback() {
-    const result = await apiGet('api/v1/mrp/work_orders?limit=500');
-    if (!result.ok) return { items: [], error: explainError(result), result };
-    const json = result.json || {};
-    const raw = asArray(json);
-    const items = raw.map((w) => ({
-      id: w.id,
-      number: w.number || w.wo_number || w.id,
-      customer: w.product || w.description || w.customer || 'İş emri',
-      status: w.status,
-      date: w.date_created || w.updated_at,
-      subject: 'İş emri (yedek liste)',
-      _raw: w,
-    }));
-    return { items, total: items.length, fallback: true, source: 'work_orders' };
-  }
-
   function filterByStatus(items) {
     if (status === 'all') return items;
     return items.filter((item) => (status === 'accepted' ? isAccepted(item) : isOpenStatus(item)));
+  }
+
+  function matchesQuery(item, q) {
+    if (!q) return true;
+    const blob = [
+      itemNumber(item),
+      itemCustomer(item),
+      item.subject,
+      item.email,
+      itemId(item),
+    ]
+      .join(' ')
+      .toLowerCase();
+    return blob.indexOf(q) !== -1;
   }
 
   function setListTitle(text) {
@@ -484,7 +559,10 @@
       title.textContent =
         status === 'accepted' ? 'Kabul edilmiş teklifler' : status === 'open' ? 'Açık teklifler' : 'Tüm teklifler';
     }
-    if (sub) sub.textContent = text || 'Üretim, satınalma, sevkiyat ve maliyet';
+    if (sub) {
+      const host = cachedBaseUrl ? ' · ' + cachedBaseUrl : '';
+      sub.textContent = (text || 'Üretim, satınalma, sevkiyat ve maliyet') + host;
+    }
   }
 
   async function probeCollection(paths) {
@@ -492,8 +570,8 @@
     for (let i = 0; i < paths.length; i++) {
       const result = await apiGet(paths[i]);
       last = result;
-      if (result && result.ok) {
-        return { ok: true, result, items: asArray(result.json), path: paths[i] };
+      if (result && result.ok && result.json != null) {
+        return { ok: true, result, items: unwrapRecords(result.json), path: paths[i] };
       }
       if (result && result.status !== 404) {
         return { ok: false, result, items: [], path: paths[i] };
@@ -502,75 +580,258 @@
     return { ok: false, result: last, items: [], path: paths[paths.length - 1] };
   }
 
-  async function loadRelatedForProposal(id) {
-    const sid = encodeURIComponent(id);
-    const [moProbe, woProbe, extProbe, shipProbe, costProbe] = await Promise.all([
-      probeCollection([
-        'api/v1/mrp/manufacturing_orders?proposal_id=' + sid + '&limit=500',
-        'api/v1/mrp/manufacturing_orders?rel_id=' + sid + '&limit=500',
-        'api/v1/mrp/manufacturing_orders?limit=500',
-      ]),
-      probeCollection([
-        'api/v1/mrp/work_orders?proposal_id=' + sid + '&limit=500',
-        'api/v1/mrp/work_orders?limit=500',
-      ]),
-      probeCollection([
-        'api/v1/mrp/work_order_external?proposal_id=' + sid + '&limit=500',
-        'api/v1/mrp/work_order_external?limit=500',
-      ]),
-      probeCollection([
-        'api/v1/mrp/external_shipments?proposal_id=' + sid + '&limit=500',
-        'api/v1/mrp/external_shipments?limit=500',
-      ]),
-      probeCollection([
-        'api/v1/mrp/operations/proposals/' + sid + '/cost',
-        'api/v1/mrp/operations/proposals/' + sid + '/costing',
-      ]),
-    ]);
-
-    let mos = moProbe.items || [];
-    if (moProbe.ok && moProbe.path && moProbe.path.indexOf('proposal_id') === -1 && moProbe.path.indexOf('rel_id') === -1) {
-      mos = mos.filter((row) => matchesProposal(row, id));
+  async function fetchTeklifList() {
+    const teklif = await apiGet('api/teklif');
+    if (teklif && (teklif.status === 401 || teklif.status === 403)) {
+      return { ok: false, result: teklif, items: [], source: 'teklif', path: 'api/teklif' };
     }
-    let wos = woProbe.items || [];
-    if (woProbe.ok && woProbe.path && woProbe.path.indexOf('proposal_id') === -1) {
-      wos = wos.filter((row) => matchesProposal(row, id));
-    }
-    let ext = extProbe.items || [];
-    if (extProbe.ok && extProbe.path && extProbe.path.indexOf('proposal_id') === -1) {
-      ext = ext.filter((row) => matchesProposal(row, id));
-    }
-    let ships = shipProbe.items || [];
-    if (shipProbe.ok && shipProbe.path && shipProbe.path.indexOf('proposal_id') === -1) {
-      ships = ships.filter((row) => matchesProposal(row, id));
+    if (teklif && teklif.ok && teklif.json != null) {
+      const items = unwrapRecords(teklif.json);
+      if (items.length) {
+        return { ok: true, result: teklif, items, source: 'teklif', path: 'api/teklif' };
+      }
     }
 
-    return {
-      mo: moProbe,
-      mos,
-      wo: woProbe,
-      wos,
-      ext: extProbe,
-      extItems: ext,
-      ship: shipProbe,
-      ships,
-      cost: costProbe,
-    };
+    const proposals = await apiGet('api/proposals');
+    if (proposals && (proposals.status === 401 || proposals.status === 403)) {
+      return { ok: false, result: proposals, items: [], source: 'proposals', path: 'api/proposals' };
+    }
+    if (proposals && proposals.ok && proposals.json != null) {
+      return {
+        ok: true,
+        result: proposals,
+        items: unwrapRecords(proposals.json),
+        source: 'proposals',
+        path: 'api/proposals',
+      };
+    }
+
+    if (teklif && teklif.ok && teklif.json != null) {
+      return { ok: true, result: teklif, items: unwrapRecords(teklif.json), source: 'teklif', path: 'api/teklif' };
+    }
+
+    const failed = proposals && proposals.status && proposals.status !== 404 ? proposals : teklif;
+    return { ok: false, result: failed || teklif || proposals, items: [], source: 'teklif' };
   }
 
-  function purchasedFromDetail(detail) {
-    const bags = [
-      detail && detail.purchases,
-      detail && detail.purchased,
-      detail && detail.purchased_items,
-      detail && detail.materials,
-      detail && detail.items,
-      detail && detail.products,
-    ];
+  async function searchTeklif(keyword) {
+    const q = String(keyword || '').trim();
+    if (!q) return { ok: false, items: [], source: 'search' };
+    const encoded = encodeURIComponent(q);
+    return probeCollection(['api/proposals/search/' + encoded, 'api/teklif/search/' + encoded]);
+  }
+
+  async function fetchTeklifDetail(id) {
+    const sid = encodeURIComponent(id);
+    const paths = ['api/teklif/' + sid, 'api/proposals/' + sid, 'api/teklif' + queryString({ id: id })];
+    let last = null;
+    for (let i = 0; i < paths.length; i++) {
+      const result = await apiGet(paths[i]);
+      last = result;
+      if (result && (result.status === 401 || result.status === 403)) {
+        return { ok: false, result, detail: null, path: paths[i] };
+      }
+      if (result && result.ok && result.json != null) {
+        const detail = unwrapOne(result.json, id);
+        if (detail) return { ok: true, result, detail, path: paths[i] };
+      }
+    }
+    return { ok: false, result: last, detail: null, path: paths[0] };
+  }
+
+  function lineItemsFrom(detail) {
+    if (!detail || typeof detail !== 'object') return [];
+    const bags = [detail.items, detail.newitems, detail.line_items, detail.lines, detail.products, detail.materials];
     for (let i = 0; i < bags.length; i++) {
       if (Array.isArray(bags[i]) && bags[i].length) return bags[i];
     }
     return [];
+  }
+
+  function indexBy(rows, keys) {
+    const map = new Map();
+    (rows || []).forEach((row) => {
+      keys.forEach((k) => {
+        const v = row && row[k];
+        if (v != null && v !== '') map.set(String(v), row);
+      });
+    });
+    return map;
+  }
+
+  function isExternalWo(row) {
+    if (!row) return false;
+    const v = row.external || row.is_external || row.work_order_external || row.dış || row.dis;
+    if (v === true || v === 1 || v === '1') return true;
+    const s = String(v || '').toLowerCase();
+    return s === 'yes' || s === 'true' || s === 'external';
+  }
+
+  async function loadRelatedForProposal(id, detail) {
+    const hint = detail || selectedItem || { id: id };
+    const [moProbe, woProbe, shipProbe, productProbe, bomProbe] = await Promise.all([
+      probeCollection(['api/mrp/manufacturing_orders']),
+      probeCollection(['api/mrp/work_orders']),
+      probeCollection(['api/mrp/external_shipments']),
+      probeCollection(['api/product']),
+      probeCollection(['api/bom']),
+    ]);
+
+    const extraIds = new Set();
+    const mosAll = moProbe.items || [];
+    const wosAll = woProbe.items || [];
+    const mos = filterRelated(mosAll, id, hint);
+    const wos = filterRelated(wosAll, id, hint);
+    mos.forEach((m) => extraIds.add('mo:' + itemId(m)));
+    wos.forEach((w) => extraIds.add('wo:' + itemId(w)));
+    const ships = filterRelated(shipProbe.items || [], id, hint, extraIds);
+    const extItems = (wos || []).filter(isExternalWo);
+
+    return {
+      mo: moProbe,
+      mos,
+      mosAll,
+      wo: woProbe,
+      wos,
+      wosAll,
+      ext: { ok: woProbe.ok, result: woProbe.result, path: woProbe.path },
+      extItems,
+      ship: shipProbe,
+      ships,
+      products: productProbe.items || [],
+      product: productProbe,
+      boms: bomProbe.items || [],
+      bom: bomProbe,
+      lines: lineItemsFrom(detail),
+    };
+  }
+
+  function enrichLine(line, products, boms) {
+    const byProduct = indexBy(products, ['id', 'product_id', 'item_id', 'code']);
+    const byBomProduct = indexBy(boms, ['product_id', 'finished_product_id', 'id']);
+    const pid = String(
+      line.product_id || line.itemid || line.item_id || line.rel_id || line.stock_id || ''
+    );
+    const code = String(line.code || line.sku || '');
+    const product = (pid && byProduct.get(pid)) || (code && byProduct.get(code)) || null;
+    const bom =
+      (pid && byBomProduct.get(pid)) ||
+      (product && byBomProduct.get(String(product.id || product.product_id || ''))) ||
+      null;
+    return { line, product, bom };
+  }
+
+  function purchasedRows(rel, detail) {
+    const products = rel.products || [];
+    const boms = rel.boms || [];
+    const lines = (rel.lines && rel.lines.length ? rel.lines : lineItemsFrom(detail)) || [];
+    const rows = [];
+
+    lines.forEach((line) => {
+      const en = enrichLine(line, products, boms);
+      const name =
+        line.description ||
+        line.name ||
+        line.product ||
+        (en.product && (en.product.description || en.product.name || en.product.code)) ||
+        itemNumber(line);
+      const vendor =
+        line.vendor ||
+        line.supplier ||
+        line.company ||
+        (en.product && (en.product.vendor || en.product.supplier || en.product.company)) ||
+        '—';
+      const qty = line.qty != null ? line.qty : line.quantity != null ? line.quantity : '—';
+      const unit = line.unit || line.unite || (en.product && en.product.unit) || '';
+      const price = numField(line, ['rate', 'price', 'unit_price', 'cost']) ??
+        numField(en.product, ['purchase_price', 'rate', 'price', 'cost', 'unit_cost']);
+      const kind = en.bom ? 'BOM / üretim' : 'Teklif satırı';
+      rows.push({ name, vendor, qty, unit, price, kind });
+    });
+
+    (rel.extItems || []).forEach((w) => {
+      rows.push({
+        name: w.product || w.description || w.name || itemNumber(w),
+        vendor: w.vendor || w.supplier || w.company || '—',
+        qty: w.qty != null ? w.qty : w.quantity != null ? w.quantity : '—',
+        unit: w.unit || '',
+        price: numField(w, ['rate', 'price', 'cost']),
+        kind: 'Dış iş emri',
+      });
+    });
+
+    (rel.boms || []).forEach((bom) => {
+      const bomLines = Array.isArray(bom.lines) ? bom.lines : Array.isArray(bom.items) ? bom.items : [];
+      const linked = lines.some((line) => {
+        const pid = String(line.product_id || line.itemid || line.item_id || '');
+        return pid && (String(bom.product_id) === pid || String(bom.id) === pid);
+      });
+      if (!linked) return;
+      bomLines.forEach((bl) => {
+        rows.push({
+          name: bl.description || bl.name || bl.product || itemNumber(bl),
+          vendor: bl.vendor || bl.supplier || '—',
+          qty: bl.product_qty != null ? bl.product_qty : bl.qty != null ? bl.qty : '—',
+          unit: bl.unit || '',
+          price: numField(bl, ['rate', 'price', 'cost']),
+          kind: 'BOM kalemi',
+        });
+      });
+    });
+
+    return rows;
+  }
+
+  function costFromAvailable(rel, detail) {
+    const fromApi = pickCost(detail);
+    const lines = (rel.lines && rel.lines.length ? rel.lines : lineItemsFrom(detail)) || [];
+    let material = null;
+    let purchase = null;
+    let lineSum = 0;
+    let lineHas = false;
+
+    lines.forEach((line) => {
+      const qty = numField(line, ['qty', 'quantity']) ?? 1;
+      const rate = numField(line, ['rate', 'price', 'unit_price', 'cost']);
+      const amount = numField(line, ['amount', 'total', 'line_total']);
+      const value = amount != null ? amount : rate != null ? qty * rate : null;
+      if (value != null) {
+        lineHas = true;
+        lineSum += value;
+      }
+    });
+
+    if (lineHas) material = lineSum;
+
+    let purchaseSum = 0;
+    let purchaseHas = false;
+    (rel.extItems || []).forEach((w) => {
+      const value = numField(w, ['cost', 'price', 'rate', 'amount', 'total']);
+      if (value != null) {
+        purchaseHas = true;
+        purchaseSum += value;
+      }
+    });
+    if (purchaseHas) purchase = purchaseSum;
+
+    const teklifTotal = numField(detail, ['total', 'grand_total', 'amount']);
+    const teklifSub = numField(detail, ['subtotal']);
+
+    const fields = {
+      material: fromApi && fromApi.material != null ? fromApi.material : material,
+      labor: fromApi ? fromApi.labor : null,
+      purchase: fromApi && fromApi.purchase != null ? fromApi.purchase : purchase,
+      shipping: fromApi ? fromApi.shipping : null,
+      overhead: fromApi ? fromApi.overhead : null,
+      total: fromApi && fromApi.total != null ? fromApi.total : teklifTotal,
+      updated: (fromApi && fromApi.updated) || (detail && (detail.updated_at || detail.date)),
+      subtotal: teklifSub,
+    };
+
+    const has = ['material', 'labor', 'purchase', 'shipping', 'overhead', 'total', 'subtotal'].some(
+      (k) => fields[k] != null && fields[k] !== ''
+    );
+    return has ? fields : null;
   }
 
   function renderMoPanel(rel) {
@@ -589,68 +850,62 @@
     const woRows = (rel.wos || []).map((w) => [
       escapeHtml(itemNumber(w)),
       escapeHtml(w.product || w.description || w.name || '—'),
-      escapeHtml(statusLabel(w.status || w.state)),
+      escapeHtml(statusLabel(w.status || w.state) + (isExternalWo(w) ? ' · dış' : '')),
       escapeHtml(fmtDate(w.date || w.date_created || w.updated_at)),
     ]);
+    const emptyMo =
+      rel.mo.ok && (rel.mosAll || []).length && !(rel.mos || []).length
+        ? 'MO listesi geldi; bu teklifle eşleşen proposal_id / rel_id kaydı yok.'
+        : 'Kabul edilmiş teklif için manufacturing_orders kaydı bulunamadı.';
     return (
-      tableHtml(
-        ['MO', 'Ürün', 'Durum', 'Miktar', 'Tarih'],
-        moRows,
-        'Bu teklife bağlı üretim emri yok',
-        'Kabul edilmiş teklif için manufacturing_orders kaydı bulunamadı.'
-      ) +
-      (woRows.length
+      tableHtml(['MO', 'Ürün', 'Durum', 'Miktar', 'Tarih'], moRows, 'Bu teklife bağlı üretim emri yok', emptyMo) +
+      (rel.wo.ok || woRows.length
         ? '<h3 class="ops-msg-title">İş emirleri</h3>' +
           tableHtml(
             ['İş emri', 'Ürün', 'Durum', 'Tarih'],
             woRows,
-            'İş emri yok',
-            ''
+            'Bu teklife bağlı iş emri yok',
+            'work_orders listesi boş veya teklif ile ilişki alanı yok.'
           )
         : '')
     );
   }
 
   function renderPurchasedPanel(rel, detail) {
-    const fromDetail = purchasedFromDetail(detail || {});
-    const fromExt = rel.extItems || [];
-    const merged = fromDetail.concat(fromExt);
-    if (!rel.ext.ok && fromDetail.length === 0 && fromExt.length === 0 && rel.ext.result && rel.ext.result.status === 404) {
-      if (fromDetail.length === 0) {
-        return sectionUnavailable('Satın alınan ürünler yüklenemedi', rel.ext.result);
-      }
-    }
-    const rows = merged.map((m) => [
-      escapeHtml(m.description || m.name || m.product || m.code || itemNumber(m)),
-      escapeHtml(m.vendor || m.supplier || m.company || '—'),
-      escapeHtml(m.qty != null ? m.qty : m.quantity != null ? m.quantity : '—'),
-      escapeHtml(m.unit || m.unite || ''),
-      fmtMoney(m.rate != null ? m.rate : m.price != null ? m.price : m.cost),
-    ]);
-    if (merged.length === 0 && rel.ext.ok) {
-      return tableHtml(
-        ['Ürün', 'Tedarikçi', 'Miktar', 'Birim', 'Birim fiyat'],
-        [],
-        'Satın alınan ürün yok',
-        'Bu teklife bağlı dış alım / malzeme satırı dönmedi.'
+    const merged = purchasedRows(rel, detail);
+    if (!merged.length && !rel.product.ok && !rel.wo.ok && !(rel.lines && rel.lines.length) && !lineItemsFrom(detail).length) {
+      return sectionUnavailable(
+        'Satın alınan ürünler yüklenemedi',
+        (rel.product && rel.product.result) || (rel.wo && rel.wo.result)
       );
     }
-    if (merged.length === 0) {
-      return sectionUnavailable('Satın alınan ürünler yüklenemedi', rel.ext.result);
-    }
+    const rows = merged.map((m) => [
+      escapeHtml(m.name),
+      escapeHtml(m.vendor),
+      escapeHtml(m.qty),
+      escapeHtml(m.unit),
+      fmtMoney(m.price),
+      escapeHtml(m.kind),
+    ]);
     return tableHtml(
-      ['Ürün', 'Tedarikçi', 'Miktar', 'Birim', 'Birim fiyat'],
+      ['Ürün', 'Tedarikçi', 'Miktar', 'Birim', 'Birim fiyat', 'Kaynak'],
       rows,
       'Satın alınan ürün yok',
-      'Bu teklife bağlı dış alım / malzeme satırı dönmedi.'
+      'Teklif satırı, ürün/BOM eşlemesi veya dış iş emri dönmedi. Sahte kalem üretilmez.'
     );
   }
 
-  function renderShipmentsPanel(rel, detail) {
-    const nested = (detail && (detail.shipments || detail.external_shipments)) || [];
-    const list = (rel.ships && rel.ships.length ? rel.ships : nested) || [];
-    if (!rel.ship.ok && list.length === 0) {
-      return sectionUnavailable('Sevkiyatlar yüklenemedi', rel.ship.result);
+  function renderShipmentsPanel(rel) {
+    const list = rel.ships || [];
+    const woRows = (rel.wos || []).map((w) => [
+      escapeHtml(itemNumber(w)),
+      escapeHtml(w.destination || w.address || w.product || w.description || '—'),
+      escapeHtml(statusLabel(w.status || w.state) + (isExternalWo(w) ? ' · dış operasyon' : '')),
+      escapeHtml(w.carrier || w.method || 'İş emri'),
+      escapeHtml(fmtDate(w.date || w.date_created || w.updated_at)),
+    ]);
+    if (!rel.ship.ok && list.length === 0 && !rel.wo.ok && !woRows.length) {
+      return sectionUnavailable('Sevkiyatlar yüklenemedi', rel.ship.result || (rel.wo && rel.wo.result));
     }
     const rows = list.map((s) => [
       escapeHtml(itemNumber(s)),
@@ -659,32 +914,46 @@
       escapeHtml(s.carrier || s.method || '—'),
       escapeHtml(fmtDate(s.date || s.shipped_at || s.updated_at || s.created_at)),
     ]);
-    return tableHtml(
-      ['Sevkiyat', 'Hedef', 'Durum', 'Taşıma', 'Tarih'],
-      rows,
-      'Sevkiyat kaydı yok',
-      'external_shipments bu teklif için boş döndü veya henüz sevk yok.'
+    return (
+      tableHtml(
+        ['Sevkiyat', 'Hedef', 'Durum', 'Taşıma', 'Tarih'],
+        rows,
+        'Sevkiyat kaydı yok',
+        'external_shipments bu teklif için boş döndü veya henüz sevk yok.'
+      ) +
+      (woRows.length
+        ? '<h3 class="ops-msg-title">İş emirleri</h3>' +
+          tableHtml(['İş emri', 'Hedef / ürün', 'Durum', 'Kaynak', 'Tarih'], woRows, 'İş emri yok', '')
+        : '')
     );
   }
 
   function renderCostPanel(rel, detail) {
-    const fromDetail = pickCost(detail);
-    const fromApi = rel.cost.ok ? pickCost(rel.cost.result && rel.cost.result.json) : null;
-    const cost = fromApi || fromDetail;
-    const note = !rel.cost.ok
-      ? explainError(rel.cost.result) +
-        ' Maliyet satırları yine de hazır; değerler API gelince dolar.'
-      : cost
-        ? 'En son dönen maliyet kalemleri.'
-        : 'Maliyet ucu yanıt verdi ancak hesap satırı yok.';
+    const cost = costFromAvailable(rel, detail);
+    const note = cost
+      ? 'Ayrı maliyet API’si yok. Değerler teklif satırları, ürün/BOM ve varsa teklif toplamından derlendi; eksik kalemler boş bırakılır.'
+      : 'Maliyet kalemi yok. Teklif satırında fiyat ve ayrı bir maliyet ucu dönmedi; toplam uydurulmaz.';
 
     const rows = [
-      ['Malzeme', cost && cost.material],
+      ['Malzeme / teklif satırları', cost && cost.material],
       ['İşçilik', cost && cost.labor],
       ['Dış alım / satınalma', cost && cost.purchase],
       ['Sevkiyat', cost && cost.shipping],
       ['Genel gider', cost && cost.overhead],
+      ['Teklif ara toplam', cost && cost.subtotal],
     ];
+    const lineRows = ((rel.lines && rel.lines.length ? rel.lines : lineItemsFrom(detail)) || []).map((line) => {
+      const qty = numField(line, ['qty', 'quantity']);
+      const rate = numField(line, ['rate', 'price', 'unit_price', 'cost']);
+      const amount = numField(line, ['amount', 'total', 'line_total']);
+      const value = amount != null ? amount : qty != null && rate != null ? qty * rate : rate;
+      return [
+        escapeHtml(line.description || line.name || line.product || itemNumber(line)),
+        escapeHtml(qty != null ? qty : '—'),
+        fmtMoney(rate),
+        fmtMoney(value),
+      ];
+    });
     return (
       '<div class="ops-cost">' +
       '<p class="ops-cost-note">' +
@@ -705,20 +974,24 @@
       '<tr class="ops-ledger-total"><th>Toplam</th><td>' +
       fmtMoney(cost && cost.total) +
       '</td></tr>' +
-      '</tbody></table></div>'
+      '</tbody></table>' +
+      (lineRows.length
+        ? '<h3 class="ops-msg-title">Teklif satırları</h3>' +
+          tableHtml(['Açıklama', 'Miktar', 'Birim fiyat', 'Tutar'], lineRows, 'Satır yok', '')
+        : '') +
+      '</div>'
     );
   }
 
   function workspaceHtml(detail, rel) {
-    const id = (detail && (detail.id || detail.proposal_id)) || selectedId;
+    const id = (detail && (detail.id || detail.proposal_id || detail.teklif_id)) || selectedId;
     const number = itemNumber(detail || selectedItem || { id: id });
     const customer = itemCustomer(detail || selectedItem || {});
     const st = (detail && (detail.status || detail.status_name)) || (selectedItem && selectedItem.status);
     const moCount = (rel.mos && rel.mos.length) || 0;
-    const buyCount =
-      purchasedFromDetail(detail || {}).length + ((rel.extItems && rel.extItems.length) || 0);
+    const buyCount = purchasedRows(rel, detail).length;
     const shipCount = (rel.ships && rel.ships.length) || 0;
-    const cost = pickCost(detail) || (rel.cost.ok ? pickCost(rel.cost.result && rel.cost.result.json) : null);
+    const cost = costFromAvailable(rel, detail);
 
     const tabs = TABS.map(
       (t) =>
@@ -786,114 +1059,116 @@
           '</section>'
       ).join('') +
       '</div>' +
-      '<h3 class="ops-msg-title">Mesajlar</h3>' +
-      '<div id="opsMessages" class="ops-messages"></div>'
+      '<p class="ops-cost-note">Mesaj API’si bu sözleşmede yok. Perfex sohbeti için Sohbet düğmesini kullanın.</p>'
     );
   }
 
   async function loadList() {
+    await refreshBaseUrl();
     setListTitle('Yükleniyor…');
     const body = el('opsListBody');
     if (body) body.innerHTML = skeletonCards(6);
     setBanner('');
 
-    const healthRes = await apiGet('api/v1/mrp/health');
-    renderMetrics(healthRes.ok ? healthRes.json : null);
-
     const ids = [];
     if (scope === 'ids') {
       const hist = await loadHistory();
       hist.forEach((h) => {
-        if (h.proposalId) ids.push(h.proposalId);
+        if (h.proposalId) ids.push(String(h.proposalId));
       });
       if (ids.length === 0) {
-        renderList([], 0, { emptyHint: 'Yerel teklif geçmişi boş.' });
+        lastListItems = [];
+        renderMetrics(null, { accepted: 0, open: 0, overdue: 0, mo: '—' });
+        renderList([], 0, { emptyHint: 'Yerel teklif geçmişi boş.', source: listSource });
         setListTitle('Yerel teklif geçmişi boş');
         return;
       }
     }
 
-    const qs = queryString({
-      status: status === 'all' ? '' : status,
-      scope,
-      q: query,
-      limit: LIMIT,
-      offset,
-      ids: ids.join(','),
-    });
-    const result = await apiGet('api/v1/mrp/operations/proposals' + qs);
-    if (!result.ok) {
+    const [listRes, moRes] = await Promise.all([
+      fetchTeklifList(),
+      apiGet('api/mrp/manufacturing_orders'),
+    ]);
+
+    if (!listRes.ok) {
       if (
-        (result.status === 401 || result.status === 403) &&
+        (listRes.result && (listRes.result.status === 401 || listRes.result.status === 403)) &&
         typeof needSettingsHandler === 'function'
       ) {
         needSettingsHandler();
       }
-      const fallback = await loadWorkOrdersFallback();
-      listSource = fallback.source || 'work_orders';
-      const msg = explainError(result);
-      setBanner(msg + (fallback.items && fallback.items.length ? ' İş emirleri yedek listesi gösteriliyor.' : ''), 'warn');
-      if (fallback.items && fallback.items.length) {
-        let items = fallback.items;
-        if (status !== 'all') {
-          const filtered = filterByStatus(items);
-          if (filtered.length) items = filtered;
-        }
-        renderList(items, items.length, { source: 'work_orders' });
-        setListTitle('İş emirleri (operasyon ucu yok)');
-        if (!warnedOps404) {
-          toast(msg, 'warn');
-          warnedOps404 = true;
-        }
-        return;
-      }
-      renderList([], 0, { emptyHint: msg });
+      const msg = explainError(listRes.result);
+      setBanner(msg + ' Liste api/teklif ve api/proposals üzerinden denenir; uydurma kayıt yok.', 'warn');
+      renderMetrics(null, { accepted: '—', open: '—', overdue: '—', mo: '—' });
+      lastListItems = [];
+      renderList([], 0, { emptyHint: msg, source: listRes.source });
       setListTitle(msg);
       toast(msg, 'err');
       return;
     }
-    listSource = 'proposals';
-    const json = result.json || {};
-    let items = json.items || json.data || [];
-    if (!Array.isArray(items)) items = asArray(json);
-    if (status !== 'all') {
-      const filtered = filterByStatus(items);
-      if (filtered.length !== items.length) items = filtered;
+
+    listSource = listRes.source || 'teklif';
+    let items = listRes.items || [];
+    lastListItems = items.slice();
+
+    const metrics = {
+      accepted: items.filter(isAccepted).length,
+      open: items.filter(isOpenStatus).length,
+      overdue: items.filter(isOverdue).length,
+      mo: moRes && moRes.ok ? unwrapRecords(moRes.json).length : '—',
+    };
+    renderMetrics(null, metrics);
+
+    if (scope === 'ids') {
+      const idSet = new Set(ids);
+      items = items.filter((item) => idSet.has(String(itemId(item))));
     }
-    const total = json.total != null ? json.total : items.length;
-    renderList(items, total, { source: 'proposals' });
-    if (json.health) renderMetrics({ ops: json.health });
+
+    const q = String(query || '').trim().toLowerCase();
+    let searchSource = listSource;
+    if (q) {
+      const remote = await searchTeklif(query);
+      if (remote.ok && remote.items && remote.items.length) {
+        items = remote.items;
+        searchSource = 'search';
+      } else {
+        items = items.filter((item) => matchesQuery(item, q));
+      }
+    }
+
+    if (status !== 'all') {
+      items = filterByStatus(items);
+    }
+
+    const sliced = items.slice(offset, offset + LIMIT);
+    const total = items.length;
+    renderList(sliced, total, { source: searchSource });
     setListTitle(total + ' kayıt · tıklayınca MO / satınalma / sevkiyat / maliyet');
   }
 
   async function openDetail(id) {
     selectedId = id;
-    lastMsgId = 0;
     detailTab = 'mo';
     el('opsListPane').hidden = true;
     el('opsDetailPane').hidden = false;
     el('opsBtnBack').hidden = false;
     if (el('opsMetrics')) el('opsMetrics').hidden = true;
     setListTitle('Teklif çalışma alanı');
-    el('opsSubtitle').textContent = 'MO, satınalma, sevkiyat ve maliyet';
+    if (el('opsSubtitle')) {
+      el('opsSubtitle').textContent =
+        'MO, satınalma, sevkiyat ve maliyet' + (cachedBaseUrl ? ' · ' + cachedBaseUrl : '');
+    }
     el('opsDetailPane').innerHTML =
       '<div class="ops-state ops-state-loading">Çalışma alanı yükleniyor…</div>';
 
-    const detailRes = await apiGet(
-      'api/v1/mrp/operations/proposals/' + encodeURIComponent(id)
-    );
-    let detail = selectedItem || { id: id };
-    if (detailRes.ok) {
-      detail = (detailRes.json && (detailRes.json.data || detailRes.json.item || detailRes.json)) || detail;
-    } else if (detailRes.status === 404) {
-      el('opsDetailPane').innerHTML = '';
-    }
+    const fromList = (lastListItems || []).find((row) => String(itemId(row)) === String(id));
+    const detailRes = await fetchTeklifDetail(id);
+    let detail = detailRes.detail || fromList || selectedItem || { id: id };
+    if (detailRes.ok && detailRes.detail) detail = detailRes.detail;
 
-    const rel = await loadRelatedForProposal(id);
-    if (!detailRes.ok && detailRes.status !== 404) {
-      toast(explainError(detailRes), 'warn');
-    } else if (!detailRes.ok) {
-      detail = Object.assign({ id: id }, selectedItem || {});
+    const rel = await loadRelatedForProposal(id, detail);
+    if (!detailRes.ok && detailRes.result && detailRes.result.status !== 404) {
+      toast(explainError(detailRes.result), 'warn');
     }
 
     el('opsDetailPane').innerHTML = workspaceHtml(detail, rel);
@@ -902,12 +1177,11 @@
       const note = document.createElement('p');
       note.className = 'ops-banner ops-banner-warn';
       note.textContent =
-        explainError(detailRes) + ' Bölümler bilinen MRP uçlarından (MO, WO, sevkiyat) doldurulur.';
+        explainError(detailRes.result) +
+        ' Liste kaydı ve MRP uçları (MO, WO, sevkiyat, ürün, BOM) ile doldurulur.';
       if (host.firstChild) host.insertBefore(note, host.firstChild);
       else host.appendChild(note);
     }
-    await loadMessages();
-    startPoll();
   }
 
   function openWeb(kind) {
@@ -925,8 +1199,6 @@
       );
     } else if (kind === 'chat') {
       window.OperasyonView.openWebPath('prchat/Prchat_Controller/chat_full_view?tab=groups');
-    } else if (kind === 'health') {
-      window.OperasyonView.openWebPath('manufacturing/ops_health');
     }
   }
 
@@ -1001,7 +1273,7 @@
         const card = e.target.closest('[data-id]');
         if (!card) return;
         const id = card.getAttribute('data-id');
-        selectedItem = {
+        selectedItem = (lastListItems || []).find((row) => String(itemId(row)) === String(id)) || {
           id: id,
           number: (card.querySelector('h3') && card.querySelector('h3').textContent) || id,
           customer: (card.querySelector('.ops-card-cust') && card.querySelector('.ops-card-cust').textContent) || '',
