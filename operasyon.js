@@ -6,18 +6,23 @@
  * Birincil detay: GET api/v1/sales_lifecycle/proposal/{id} (tüm bölümler).
  * Yedek: api/teklif, api/proposals ve MRP uçları. Sahte kayıt yok.
  * Filtre: Tümü / Açık işler / Kabul edilmiş + arama.
- * Kabul edilmiş çalışma alanı: satınalma, depo, sevkiyat, kalite, MO.
+ * Kabul: yalnız data.accepted === true (MO/sevk var diye kabul sayılmaz).
+ * Açık: status === 1. Başlık: data.title veya company / customer_name (customer obje).
+ * KPI: data.counts.shipments / mos / purchased. İlk sekme: data.default_tab.
+ * Sevk: data.shipments[] veya data.sections.shipments.rows[].
+ * data.items teklif kalemidir, satınalma değil; purchased gerçek PR/PO.
  */
 (function () {
   const LIMIT = 50;
   const LIFE_PAGE = 100;
   const LIFE_MAX_PAGES = 50;
   const TABS = [
-    { id: 'purchased', label: 'Satın alınan' },
-    { id: 'warehouse', label: 'Depodan alınan' },
+    { id: 'purchased', label: 'Satınalma' },
     { id: 'shipments', label: 'Sevkiyatlar' },
-    { id: 'quality', label: 'Kalite' },
     { id: 'mo', label: "MO'lar" },
+    { id: 'items', label: 'Teklif kalemleri' },
+    { id: 'warehouse', label: 'Depodan alınan' },
+    { id: 'quality', label: 'Kalite' },
   ];
 
   let status = 'all';
@@ -160,7 +165,11 @@
       obj.teklif_id ||
       obj.subject ||
       obj.number ||
-      obj.proposal_number
+      obj.proposal_number ||
+      obj.title ||
+      obj.customer_name ||
+      obj.accepted === true ||
+      obj.accepted === false
     );
   }
 
@@ -199,35 +208,34 @@
     });
   }
 
-  function statusLabel(raw) {
-    const s = String(raw == null ? '' : raw).toLowerCase();
-    if (s === '6' || /accept|kabul|approved/.test(s)) return 'Kabul edilmiş';
-    if (s === '3' || s === 'open' || s === 'açık' || s === 'acik') return 'Açık';
-    if (s === '1' || s === 'draft') return 'Taslak';
+  function statusLabel(itemOrRaw) {
+    if (itemOrRaw && typeof itemOrRaw === 'object') {
+      if (isAccepted(itemOrRaw)) return 'Kabul edilmiş';
+      if (isOpenStatus(itemOrRaw)) return 'Açık';
+      const raw = itemOrRaw.status_key || itemOrRaw.status_name || itemOrRaw.status;
+      if (raw && typeof raw === 'object') return statusLabel(raw.name || raw.label || raw.key || '');
+      return raw != null && raw !== '' ? String(raw) : '—';
+    }
+    const s = String(itemOrRaw == null ? '' : itemOrRaw).toLowerCase();
+    if (s === '1') return 'Açık';
+    if (s === 'draft') return 'Taslak';
     if (s === '2' || s === 'sent') return 'Gönderildi';
     if (s === '4' || /revis/.test(s)) return 'Revize';
     if (s === '5' || /declin|red/.test(s)) return 'Reddedildi';
-    return raw ? String(raw) : '—';
+    return itemOrRaw ? String(itemOrRaw) : '—';
   }
 
   function isAccepted(item) {
     if (!item || typeof item !== 'object') return false;
-    if (item.accepted === true || item.is_accepted === true || item.accepted === 1) return true;
-    const s = String(
-      item.status || item.status_name || item.proposal_status || item.state || item.lifecycle_status || ''
-    ).toLowerCase();
-    if (s === '6' || /accept|kabul|approved/.test(s)) return true;
-    if (Number(item.status) === 6) return true;
-    return false;
+    const root = lifecycleRecord(item) || item;
+    return root.accepted === true;
   }
 
   function isOpenStatus(item) {
-    const s = String(
-      (item && (item.status || item.status_name || item.proposal_status || item.state)) || ''
-    ).toLowerCase();
-    if (s === '3' || s === 'open' || s === 'açık' || s === 'acik' || s === 'outstanding') return true;
-    if (Number(item && item.status) === 3) return true;
-    return false;
+    if (!item || typeof item !== 'object') return false;
+    const root = lifecycleRecord(item) || item;
+    if (root.accepted === true) return false;
+    return Number(root.status) === 1 || String(root.status) === '1';
   }
 
   function teklifSortId(item) {
@@ -305,6 +313,53 @@
     return ids;
   }
 
+  function lifecycleRecord(json) {
+    if (!json || typeof json !== 'object' || Array.isArray(json)) return json;
+    const data = json.data;
+    if (data && typeof data === 'object' && !Array.isArray(data)) {
+      if (
+        data.title ||
+        data.company ||
+        data.customer_name ||
+        data.accepted === true ||
+        data.accepted === false ||
+        data.counts ||
+        data.shipments ||
+        data.sections ||
+        data.purchased ||
+        data.items ||
+        data.default_tab ||
+        data.id
+      ) {
+        return data;
+      }
+    }
+    return json;
+  }
+
+  function displayText(value) {
+    if (value == null || value === '') return '';
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+    if (typeof value === 'boolean') return '';
+    if (typeof value === 'string') {
+      const t = value.trim();
+      if (!t || t === '[object Object]') return '';
+      return t;
+    }
+    if (typeof value === 'object') {
+      return (
+        displayText(value.customer_name) ||
+        displayText(value.company) ||
+        displayText(value.name) ||
+        displayText(value.title) ||
+        displayText(value.full_name) ||
+        displayText(value.proposal_to) ||
+        displayText(value.label)
+      );
+    }
+    return '';
+  }
+
   function firstArray(obj, names) {
     if (!obj || typeof obj !== 'object') return [];
     for (let i = 0; i < names.length; i++) {
@@ -336,10 +391,30 @@
   }
 
   function pickSection(json, names) {
-    const bags = lifecycleRoots(json);
-    for (let b = 0; b < bags.length; b++) {
-      const found = firstArray(bags[b], names);
+    const root = lifecycleRecord(json) || json;
+    for (let i = 0; i < names.length; i++) {
+      const found = sectionRows(root, names[i]);
       if (found.length) return found;
+    }
+    return [];
+  }
+
+  function sectionRows(json, name) {
+    if (!json || typeof json !== 'object' || !name) return [];
+    const root = lifecycleRecord(json) || json;
+    const bags = [root];
+    if (root.sections && typeof root.sections === 'object') bags.push(root.sections);
+    if (json && json !== root) bags.push(json);
+    for (let b = 0; b < bags.length; b++) {
+      const bag = bags[b];
+      if (!bag || typeof bag !== 'object') continue;
+      const v = bag[name];
+      if (Array.isArray(v) && v.length) return v;
+      if (v && typeof v === 'object') {
+        if (Array.isArray(v.rows) && v.rows.length) return v.rows;
+        if (Array.isArray(v.items) && v.items.length) return v.items;
+        if (Array.isArray(v.data) && v.data.length) return v.data;
+      }
     }
     return [];
   }
@@ -406,15 +481,28 @@
     );
   }
 
+  function itemTitle(item) {
+    const root = lifecycleRecord(item) || item || {};
+    return (
+      displayText(root.title) ||
+      displayText(root.company) ||
+      displayText(root.customer_name) ||
+      displayText(root.customer) ||
+      itemNumber(root)
+    );
+  }
+
   function itemCustomer(item) {
     if (!item) return '—';
+    const root = lifecycleRecord(item) || item;
     return (
-      item.customer ||
-      item.company ||
-      item.client ||
-      item.proposal_to ||
-      item.client_company ||
-      item.rel_name ||
+      displayText(root.customer_name) ||
+      displayText(root.company) ||
+      displayText(root.customer) ||
+      displayText(root.client) ||
+      displayText(root.proposal_to) ||
+      displayText(root.client_company) ||
+      displayText(root.rel_name) ||
       '—'
     );
   }
@@ -585,12 +673,14 @@
         .map((item) => {
           const id = itemId(item);
           const accepted = isAccepted(item);
-          const openJob = hasLifecycleOpenJob(item) || (info.openIds && info.openIds.has(String(id)));
-          const tone = accepted ? 'ok' : openJob || isOpenStatus(item) ? 'open' : 'muted';
-          const subject = item.subject && itemCustomer(item) !== item.subject ? item.subject : item.priority || 'Teklif çalışma alanı';
+          const openJob = isOpenStatus(item);
+          const tone = accepted ? 'ok' : openJob ? 'open' : 'muted';
+          const heading = itemTitle(item);
+          const customer = itemCustomer(item);
+          const subject = heading !== customer && customer !== '—' ? customer : itemNumber(item);
           const flags =
             (accepted ? '<span class="ops-flag ops-flag-ok">Kabul</span>' : '') +
-            (openJob ? '<span class="ops-flag ops-flag-open">Açık iş</span>' : '');
+            (openJob ? '<span class="ops-flag ops-flag-open">Açık</span>' : '');
           return (
             '<article class="ops-card" data-id="' +
             escapeHtml(id) +
@@ -599,17 +689,17 @@
             '<span class="ops-badge ops-badge-' +
             tone +
             '">' +
-            escapeHtml(statusLabel(item.status || item.status_name || item.lifecycle_status)) +
+            escapeHtml(statusLabel(item)) +
             '</span>' +
             '<time>' +
             escapeHtml(fmtDate(item.date || item.updated_at || item.created_at || item.datecreated || item.acceptance_date)) +
             '</time>' +
             '</div>' +
             '<h3>' +
-            escapeHtml(itemNumber(item)) +
+            escapeHtml(heading) +
             '</h3>' +
             '<p class="ops-card-cust">' +
-            escapeHtml(itemCustomer(item)) +
+            escapeHtml(customer) +
             '</p>' +
             '<div class="ops-card-foot">' +
             '<span>' +
@@ -697,19 +787,17 @@
     return (result && result.items) || [];
   }
 
-  function filterByStatus(items, openTeklifIds) {
+  function filterByStatus(items) {
     if (status === 'all') return items;
     if (status === 'accepted') return items.filter(isAccepted);
-    if (status === 'open') {
-      const ids = openTeklifIds || new Set();
-      return items.filter((item) => ids.has(String(itemId(item))));
-    }
+    if (status === 'open') return items.filter(isOpenStatus);
     return items;
   }
 
   function matchesQuery(item, q) {
     if (!q) return true;
     const blob = [
+      itemTitle(item),
       itemNumber(item),
       itemCustomer(item),
       item.subject,
@@ -771,13 +859,17 @@
 
   function flattenLifecycleItem(row) {
     if (!row || typeof row !== 'object') return row;
+    const rec = lifecycleRecord(row) || row;
     const nested =
-      row.proposal && typeof row.proposal === 'object' && !Array.isArray(row.proposal) ? row.proposal : null;
-    if (!nested) return row;
-    return Object.assign({}, nested, row, {
-      id: row.id || nested.id || nested.proposal_id,
-      status: row.status != null && row.status !== '' ? row.status : nested.status,
-      subject: row.subject || nested.subject,
+      rec.proposal && typeof rec.proposal === 'object' && !Array.isArray(rec.proposal) ? rec.proposal : null;
+    if (!nested) return rec;
+    return Object.assign({}, nested, rec, {
+      id: rec.id || nested.id || nested.proposal_id,
+      status: rec.status != null && rec.status !== '' ? rec.status : nested.status,
+      accepted: rec.accepted === true ? true : nested.accepted === true ? true : rec.accepted,
+      title: rec.title || nested.title,
+      company: rec.company != null ? rec.company : nested.company,
+      customer_name: rec.customer_name || nested.customer_name,
     });
   }
 
@@ -850,11 +942,8 @@
       }
       if (result && result.ok && result.json != null) {
         const json = result.json;
-        const detail =
-          unwrapOne(json, id) ||
-          unwrapOne((json && json.proposal) || (json && json.data && json.data.proposal), id) ||
-          (json && typeof json === 'object' ? json : null);
-        return { ok: true, result, detail: detail || json, json: json, path: paths[i] };
+        const detail = lifecycleRecord(json) || unwrapOne(json, id) || json;
+        return { ok: true, result, detail: detail, json: json, path: paths[i] };
       }
     }
     return { ok: false, result: last, detail: null, json: null, path: paths[0] };
@@ -937,19 +1026,17 @@
         return { ok: false, result, detail: null, json: null, path: paths[i] };
       }
       if (result && result.ok && result.json != null) {
-        const detail = unwrapOne(result.json, id);
-        if (detail) return { ok: true, result, detail, json: result.json, path: paths[i] };
+        const rec = lifecycleRecord(result.json) || unwrapOne(result.json, id);
+        if (rec) return { ok: true, result, detail: rec, json: result.json, path: paths[i] };
       }
     }
     return { ok: false, result: last, detail: null, json: null, path: paths[0] };
   }
 
   function lineItemsFrom(detail) {
-    if (!detail || typeof detail !== 'object') return [];
-    const bags = [detail.items, detail.newitems, detail.line_items, detail.lines, detail.products, detail.materials];
-    for (let i = 0; i < bags.length; i++) {
-      if (Array.isArray(bags[i]) && bags[i].length) return bags[i];
-    }
+    const root = lifecycleRecord(detail) || detail;
+    if (!root || typeof root !== 'object') return [];
+    if (Array.isArray(root.items)) return root.items;
     return [];
   }
 
@@ -974,91 +1061,88 @@
 
   async function loadRelatedForProposal(id, detail, lifeJson) {
     const hint = detail || selectedItem || { id: id };
-    const root = lifeJson || detail || {};
-    const lifePurchases = pickSection(root, [
-      'purchases',
-      'purchased',
-      'purchase_orders',
-      'purchase_items',
-      'satinalma',
-      'procured',
-      'buy_items',
-    ]);
-    const lifeWarehouse = pickSection(root, [
-      'warehouse',
-      'warehouse_picks',
-      'warehouse_items',
-      'stock_picks',
-      'stock_moves',
-      'inventory_moves',
-      'picks',
-      'depo',
-      'depo_urunler',
-      'picked',
-    ]);
-    const lifeShips = pickSection(root, [
-      'shipments',
-      'external_shipments',
-      'sevkiyat',
-      'sevkiyatlar',
-      'deliveries',
-    ]);
-    const lifeQuality = pickSection(root, [
-      'quality',
-      'quality_ops',
-      'quality_operations',
-      'qc',
-      'inspections',
-      'kalite',
-      'ncr',
-    ]);
-    const lifeMos = pickSection(root, [
-      'manufacturing_orders',
-      'mos',
-      'open_jobs',
-      'open_mos',
-      'production',
-    ]);
-    const lifeWos = pickSection(root, ['work_orders', 'open_work_orders', 'wos']);
+    const root = lifecycleRecord(lifeJson || detail) || detail || {};
+    const hasLifecycle = !!(
+      root &&
+      (root.accepted === true ||
+        root.accepted === false ||
+        root.counts ||
+        root.sections ||
+        root.shipments ||
+        root.purchased ||
+        root.default_tab ||
+        root.title)
+    );
 
-    const [moProbe, woProbe, shipProbe, productProbe, bomProbe] = await Promise.all([
+    const lifePurchases = sectionRows(root, 'purchased');
+    const lifeWarehouse = pickSection(root, ['warehouse', 'warehouse_picks', 'depo']);
+    const lifeShips = sectionRows(root, 'shipments');
+    const lifeQuality = pickSection(root, ['quality', 'quality_ops', 'qc', 'kalite']);
+    const lifeMos = pickSection(root, ['mos', 'manufacturing_orders']);
+    const lifeItems = Array.isArray(root.items) ? root.items : [];
+
+    if (hasLifecycle) {
+      return {
+        fromLifecycle: true,
+        mo: { ok: true, result: null, path: 'api/v1/sales_lifecycle' },
+        mos: lifeMos,
+        mosAll: lifeMos,
+        wo: { ok: true, result: null, path: '' },
+        wos: [],
+        wosAll: [],
+        ext: { ok: true, result: null, path: '' },
+        extItems: [],
+        ship: { ok: true, result: null, path: 'api/v1/sales_lifecycle' },
+        ships: lifeShips,
+        warehouse: lifeWarehouse,
+        quality: lifeQuality,
+        lifePurchases: lifePurchases,
+        products: [],
+        product: { ok: true, result: null },
+        boms: [],
+        bom: { ok: true, result: null },
+        lines: lifeItems,
+        counts: root.counts && typeof root.counts === 'object' ? root.counts : {},
+        defaultTab: root.default_tab,
+        lifeJson: root,
+      };
+    }
+
+    const [moProbe, woProbe, shipProbe] = await Promise.all([
       probeCollection(['api/mrp/manufacturing_orders']),
       probeCollection(['api/mrp/work_orders']),
       probeCollection(['api/mrp/external_shipments']),
-      probeCollection(['api/product']),
-      probeCollection(['api/bom']),
     ]);
 
+    const mos = filterRelated(moProbe.items || [], id, hint);
+    const wos = filterRelated(woProbe.items || [], id, hint);
     const extraIds = new Set();
-    const mosAll = mergeRows(lifeMos, moProbe.items || []);
-    const wosAll = mergeRows(lifeWos, woProbe.items || []);
-    const mos = mergeRows(lifeMos, filterRelated(moProbe.items || [], id, hint));
-    const wos = mergeRows(lifeWos, filterRelated(woProbe.items || [], id, hint));
     mos.forEach((m) => extraIds.add('mo:' + itemId(m)));
     wos.forEach((w) => extraIds.add('wo:' + itemId(w)));
-    const mrpShips = filterRelated(shipProbe.items || [], id, hint, extraIds);
-    const ships = mergeRows(lifeShips, mrpShips);
-    const extItems = (wos || []).filter(isExternalWo);
+    const ships = filterRelated(shipProbe.items || [], id, hint, extraIds);
 
     return {
-      mo: { ok: !!(lifeMos.length || moProbe.ok), result: moProbe.result, path: moProbe.path },
+      fromLifecycle: false,
+      mo: moProbe,
       mos,
-      mosAll,
-      wo: { ok: !!(lifeWos.length || woProbe.ok), result: woProbe.result, path: woProbe.path },
+      mosAll: moProbe.items || [],
+      wo: woProbe,
       wos,
-      wosAll,
-      ext: { ok: woProbe.ok || extItems.length, result: woProbe.result, path: woProbe.path },
-      extItems,
-      ship: { ok: !!(lifeShips.length || shipProbe.ok), result: shipProbe.result, path: shipProbe.path },
+      wosAll: woProbe.items || [],
+      ext: { ok: woProbe.ok, result: woProbe.result, path: woProbe.path },
+      extItems: [],
+      ship: shipProbe,
       ships,
-      warehouse: lifeWarehouse,
-      quality: lifeQuality,
-      lifePurchases,
-      products: productProbe.items || [],
-      product: productProbe,
-      boms: bomProbe.items || [],
-      bom: bomProbe,
+      warehouse: [],
+      quality: [],
+      lifePurchases: [],
+      products: [],
+      product: { ok: false, result: null },
+      boms: [],
+      bom: { ok: false, result: null },
       lines: lineItemsFrom(detail),
+      counts: {},
+      defaultTab: '',
       lifeJson: root,
     };
   }
@@ -1094,19 +1178,19 @@
   function catalogRow(row, kind) {
     return {
       name:
-        row.product ||
-        row.description ||
-        row.name ||
-        row.item ||
-        row.product_name ||
+        displayText(row.product) ||
+        displayText(row.description) ||
+        displayText(row.name) ||
+        displayText(row.item) ||
+        displayText(row.product_name) ||
         itemNumber(row),
       vendor:
-        row.vendor ||
-        row.supplier ||
-        row.company ||
-        row.warehouse ||
-        row.warehouse_name ||
-        row.location ||
+        displayText(row.vendor) ||
+        displayText(row.supplier) ||
+        displayText(row.company) ||
+        displayText(row.warehouse) ||
+        displayText(row.warehouse_name) ||
+        displayText(row.location) ||
         '—',
       qty:
         row.qty != null
@@ -1118,78 +1202,17 @@
               : row.qty_picked != null
                 ? row.qty_picked
                 : '—',
-      unit: row.unit || row.uom || row.unite || '',
+      unit: displayText(row.unit) || displayText(row.uom) || displayText(row.unite) || '',
       price: numField(row, ['rate', 'price', 'unit_price', 'cost', 'amount']),
       kind: kind,
-      status: row.status || row.state || row.qc_status || row.result || row.outcome || '',
+      status: displayText(row.status_key) || displayText(row.status) || displayText(row.state) || '',
       date: row.date || row.picked_at || row.shipped_at || row.inspected_at || row.created_at || row.updated_at,
-      extra: row.lot || row.serial || row.inspector || row.operation || row.notes || '',
+      extra: displayText(row.lot) || displayText(row.serial) || displayText(row.notes) || '',
     };
   }
 
-  function purchasedRows(rel, detail) {
-    const products = rel.products || [];
-    const boms = rel.boms || [];
-    const lines = (rel.lines && rel.lines.length ? rel.lines : lineItemsFrom(detail)) || [];
-    const rows = [];
-
-    (rel.lifePurchases || []).forEach((row) => {
-      rows.push(catalogRow(row, 'Satınalma'));
-    });
-
-    lines.forEach((line) => {
-      const en = enrichLine(line, products, boms);
-      const name =
-        line.description ||
-        line.name ||
-        line.product ||
-        (en.product && (en.product.description || en.product.name || en.product.code)) ||
-        itemNumber(line);
-      const vendor =
-        line.vendor ||
-        line.supplier ||
-        line.company ||
-        (en.product && (en.product.vendor || en.product.supplier || en.product.company)) ||
-        '—';
-      const qty = line.qty != null ? line.qty : line.quantity != null ? line.quantity : '—';
-      const unit = line.unit || line.unite || (en.product && en.product.unit) || '';
-      const price = numField(line, ['rate', 'price', 'unit_price', 'cost']) ??
-        numField(en.product, ['purchase_price', 'rate', 'price', 'cost', 'unit_cost']);
-      const kind = en.bom ? 'BOM / üretim' : 'Teklif satırı';
-      rows.push({ name, vendor, qty, unit, price, kind });
-    });
-
-    (rel.extItems || []).forEach((w) => {
-      rows.push({
-        name: w.product || w.description || w.name || itemNumber(w),
-        vendor: w.vendor || w.supplier || w.company || '—',
-        qty: w.qty != null ? w.qty : w.quantity != null ? w.quantity : '—',
-        unit: w.unit || '',
-        price: numField(w, ['rate', 'price', 'cost']),
-        kind: 'Dış iş emri',
-      });
-    });
-
-    (rel.boms || []).forEach((bom) => {
-      const bomLines = Array.isArray(bom.lines) ? bom.lines : Array.isArray(bom.items) ? bom.items : [];
-      const linked = lines.some((line) => {
-        const pid = String(line.product_id || line.itemid || line.item_id || '');
-        return pid && (String(bom.product_id) === pid || String(bom.id) === pid);
-      });
-      if (!linked) return;
-      bomLines.forEach((bl) => {
-        rows.push({
-          name: bl.description || bl.name || bl.product || itemNumber(bl),
-          vendor: bl.vendor || bl.supplier || '—',
-          qty: bl.product_qty != null ? bl.product_qty : bl.qty != null ? bl.qty : '—',
-          unit: bl.unit || '',
-          price: numField(bl, ['rate', 'price', 'cost']),
-          kind: 'BOM kalemi',
-        });
-      });
-    });
-
-    return rows;
+  function purchasedRows(rel) {
+    return (rel.lifePurchases || []).map((row) => catalogRow(row, 'PR/PO'));
   }
 
   function warehouseRows(rel) {
@@ -1198,6 +1221,57 @@
 
   function qualityRows(rel) {
     return (rel.quality || []).map((row) => catalogRow(row, 'Kalite'));
+  }
+
+  function lifecycleCounts(detail, rel) {
+    const root = lifecycleRecord(detail) || detail || {};
+    const c = (rel && rel.counts) || root.counts;
+    if (!c || typeof c !== 'object') {
+      return { shipments: '—', mos: '—', purchased: '—' };
+    }
+    return {
+      shipments: c.shipments != null ? c.shipments : '—',
+      mos: c.mos != null ? c.mos : '—',
+      purchased: c.purchased != null ? c.purchased : '—',
+    };
+  }
+
+  function countNumber(value) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function normalizeTab(raw) {
+    const s = String(raw || '').toLowerCase().trim();
+    if (!s) return '';
+    if (s === 'shipments' || s === 'shipment' || s === 'sevkiyat' || s === 'sevkiyatlar') return 'shipments';
+    if (s === 'purchased' || s === 'purchase' || s === 'satinalma' || s === 'satınalma') return 'purchased';
+    if (s === 'mo' || s === 'mos' || s === 'manufacturing') return 'mo';
+    if (s === 'items' || s === 'kalem' || s === 'kalemler') return 'items';
+    if (s === 'warehouse' || s === 'depo') return 'warehouse';
+    if (s === 'quality' || s === 'kalite' || s === 'qc') return 'quality';
+    return s;
+  }
+
+  function pickDefaultTab(detail, rel) {
+    const root = lifecycleRecord(detail) || detail || {};
+    const requested = normalizeTab(root.default_tab || (rel && rel.defaultTab));
+    const ids = TABS.map((t) => t.id);
+    if (requested && ids.indexOf(requested) !== -1) return requested;
+    const counts = lifecycleCounts(detail, rel);
+    const purchasedN = countNumber(counts.purchased);
+    const ships = (rel && rel.ships) || [];
+    if (purchasedN === 0 && ships.length) return 'shipments';
+    return 'purchased';
+  }
+
+  function shippedLabel(raw) {
+    if (raw === true || raw === 1 || raw === '1') return 'Evet';
+    if (raw === false || raw === 0 || raw === '0') return 'Hayır';
+    if (raw == null || raw === '') return '—';
+    const asDate = fmtDate(raw);
+    if (asDate !== String(raw)) return asDate;
+    return displayText(raw) || String(raw);
   }
 
   function costFromAvailable(rel, detail) {
@@ -1289,21 +1363,8 @@
     );
   }
 
-  function renderPurchasedPanel(rel, detail) {
-    const merged = purchasedRows(rel, detail);
-    if (
-      !merged.length &&
-      !rel.product.ok &&
-      !rel.wo.ok &&
-      !(rel.lines && rel.lines.length) &&
-      !lineItemsFrom(detail).length &&
-      !(rel.lifePurchases && rel.lifePurchases.length)
-    ) {
-      return sectionUnavailable(
-        'Satın alınan ürünler yüklenemedi',
-        (rel.product && rel.product.result) || (rel.wo && rel.wo.result)
-      );
-    }
+  function renderPurchasedPanel(rel) {
+    const merged = purchasedRows(rel);
     const rows = merged.map((m) => [
       escapeHtml(m.name),
       escapeHtml(m.vendor),
@@ -1316,7 +1377,7 @@
       ['Ürün', 'Tedarikçi', 'Miktar', 'Birim', 'Birim fiyat', 'Kaynak'],
       rows,
       'Satın alınan ürün yok',
-      'Satış yaşam döngüsü satınalma bölümü, teklif satırı veya dış iş emri dönmedi. Sahte kalem üretilmez.'
+      'purchased gerçek PR/PO kaydıdır. Teklif kalemleri (items) satınalma değildir; boşsa uydurulmaz.'
     );
   }
 
@@ -1371,34 +1432,40 @@
 
   function renderShipmentsPanel(rel) {
     const list = rel.ships || [];
-    const woRows = (rel.wos || []).map((w) => [
-      escapeHtml(itemNumber(w)),
-      escapeHtml(w.destination || w.address || w.product || w.description || '—'),
-      escapeHtml(statusLabel(w.status || w.state) + (isExternalWo(w) ? ' · dış operasyon' : '')),
-      escapeHtml(w.carrier || w.method || 'İş emri'),
-      escapeHtml(fmtDate(w.date || w.date_created || w.updated_at)),
-    ]);
-    if (!rel.ship.ok && list.length === 0 && !rel.wo.ok && !woRows.length) {
-      return sectionUnavailable('Sevkiyatlar yüklenemedi', rel.ship.result || (rel.wo && rel.wo.result));
-    }
     const rows = list.map((s) => [
-      escapeHtml(itemNumber(s)),
-      escapeHtml(s.destination || s.address || s.customer || s.to || '—'),
-      escapeHtml(statusLabel(s.status || s.state)),
-      escapeHtml(s.carrier || s.method || '—'),
-      escapeHtml(fmtDate(s.date || s.shipped_at || s.updated_at || s.created_at)),
+      escapeHtml(displayText(s.product) || displayText(s.description) || itemNumber(s)),
+      escapeHtml(s.qty != null ? s.qty : s.quantity != null ? s.quantity : '—'),
+      escapeHtml(displayText(s.plate) || '—'),
+      escapeHtml(displayText(s.waybill_no) || displayText(s.waybill) || '—'),
+      escapeHtml(displayText(s.status_key) || statusLabel(s)),
+      escapeHtml(shippedLabel(s.shipped)),
     ]);
-    return (
-      tableHtml(
-        ['Sevkiyat', 'Hedef', 'Durum', 'Taşıma', 'Tarih'],
-        rows,
-        'Sevkiyat kaydı yok',
-        'external_shipments bu teklif için boş döndü veya henüz sevk yok.'
-      ) +
-      (woRows.length
-        ? '<h3 class="ops-msg-title">İş emirleri</h3>' +
-          tableHtml(['İş emri', 'Hedef / ürün', 'Durum', 'Kaynak', 'Tarih'], woRows, 'İş emri yok', '')
-        : '')
+    return tableHtml(
+      ['Ürün', 'Miktar', 'Plaka', 'İrsaliye', 'Durum', 'Sevk'],
+      rows,
+      'Sevkiyat kaydı yok',
+      'data.shipments veya data.sections.shipments.rows boş. Sahte sevk üretilmez.'
+    );
+  }
+
+  function renderItemsPanel(rel, detail) {
+    const lines = (rel.lines && rel.lines.length ? rel.lines : lineItemsFrom(detail)) || [];
+    const rows = lines.map((line) => {
+      const qty = line.qty != null ? line.qty : line.quantity != null ? line.quantity : '—';
+      const rate = numField(line, ['rate', 'price', 'unit_price']);
+      const amount = numField(line, ['amount', 'total', 'line_total']);
+      return [
+        escapeHtml(displayText(line.description) || displayText(line.name) || displayText(line.product) || itemNumber(line)),
+        escapeHtml(qty),
+        fmtMoney(rate),
+        fmtMoney(amount),
+      ];
+    });
+    return tableHtml(
+      ['Açıklama', 'Miktar', 'Birim fiyat', 'Tutar'],
+      rows,
+      'Teklif kalemi yok',
+      'data.items teklif kalemleridir; satınalma (purchased) değildir.'
     );
   }
 
@@ -1458,21 +1525,20 @@
   }
 
   function workspaceHtml(detail, rel) {
-    const id = (detail && (detail.id || detail.proposal_id || detail.teklif_id)) || selectedId;
-    const number = itemNumber(detail || selectedItem || { id: id });
+    const heading = itemTitle(detail || selectedItem || { id: selectedId });
     const customer = itemCustomer(detail || selectedItem || {});
-    const st = (detail && (detail.status || detail.status_name || detail.lifecycle_status)) || (selectedItem && selectedItem.status);
-    const moCount = (rel.mos && rel.mos.length) || 0;
-    const buyCount = purchasedRows(rel, detail).length;
+    const counts = lifecycleCounts(detail, rel);
+    const buyRows = purchasedRows(rel);
     const shipCount = (rel.ships && rel.ships.length) || 0;
-    const whCount = warehouseRows(rel).length;
-    const qcCount = qualityRows(rel).length;
-    const counts = {
-      purchased: buyCount,
-      warehouse: whCount,
-      shipments: shipCount,
-      quality: qcCount,
-      mo: moCount,
+    const moCount = (rel.mos && rel.mos.length) || 0;
+    const itemCount = (rel.lines && rel.lines.length) || 0;
+    const tabCounts = {
+      purchased: countNumber(counts.purchased) || buyRows.length,
+      warehouse: warehouseRows(rel).length,
+      shipments: countNumber(counts.shipments) || shipCount,
+      quality: qualityRows(rel).length,
+      mo: countNumber(counts.mos) || moCount,
+      items: itemCount,
     };
 
     const tabs = TABS.map(
@@ -1484,28 +1550,39 @@
         '">' +
         escapeHtml(t.label) +
         '<span class="ops-tab-count">' +
-        escapeHtml(String(counts[t.id] != null ? counts[t.id] : 0)) +
+        escapeHtml(String(tabCounts[t.id] != null ? tabCounts[t.id] : 0)) +
         '</span>' +
         '</button>'
     ).join('');
 
     const panels = {
-      purchased: renderPurchasedPanel(rel, detail),
+      purchased: renderPurchasedPanel(rel),
       warehouse: renderWarehousePanel(rel),
-      shipments: renderShipmentsPanel(rel, detail),
+      shipments: renderShipmentsPanel(rel),
       quality: renderQualityPanel(rel),
       mo: renderMoPanel(rel),
+      items: renderItemsPanel(rel, detail),
+    };
+
+    const kpi = function (label, value) {
+      return (
+        '<div class="ops-metric"><span>' +
+        escapeHtml(label) +
+        '</span><strong>' +
+        escapeHtml(value == null || value === '' ? '—' : String(value)) +
+        '</strong></div>'
+      );
     };
 
     return (
       '<div class="ops-ws-head">' +
       '<div>' +
       '<p class="ops-kicker">' +
-      escapeHtml(statusLabel(st)) +
-      (isAccepted(detail || selectedItem) ? ' · kabul edilmiş iş' : ' · çalışma alanı') +
+      escapeHtml(statusLabel(detail || selectedItem)) +
+      (isAccepted(detail || selectedItem) ? ' · kabul edilmiş iş' : isOpenStatus(detail || selectedItem) ? ' · açık iş' : ' · çalışma alanı') +
       '</p>' +
       '<h2>' +
-      escapeHtml(number) +
+      escapeHtml(heading) +
       '</h2>' +
       '<p class="ops-ws-cust">' +
       escapeHtml(customer) +
@@ -1518,21 +1595,9 @@
       '</div>' +
       '</div>' +
       '<div class="ops-ws-metrics">' +
-      '<div class="ops-metric"><span>Satınalma</span><strong>' +
-      escapeHtml(buyCount ? String(buyCount) : '—') +
-      '</strong></div>' +
-      '<div class="ops-metric"><span>Depo</span><strong>' +
-      escapeHtml(whCount ? String(whCount) : '—') +
-      '</strong></div>' +
-      '<div class="ops-metric"><span>Sevkiyat</span><strong>' +
-      escapeHtml(rel.ship.ok || shipCount ? String(shipCount) : '—') +
-      '</strong></div>' +
-      '<div class="ops-metric"><span>Kalite</span><strong>' +
-      escapeHtml(qcCount ? String(qcCount) : '—') +
-      '</strong></div>' +
-      '<div class="ops-metric"><span>MO</span><strong>' +
-      escapeHtml(rel.mo.ok || moCount ? String(moCount) : '—') +
-      '</strong></div>' +
+      kpi('Sevkiyat', counts.shipments) +
+      kpi('MO', counts.mos) +
+      kpi('Satınalma', counts.purchased) +
       '</div>' +
       '<nav class="ops-tabs" id="opsTabs">' +
       tabs +
@@ -1549,7 +1614,7 @@
           '</section>'
       ).join('') +
       '</div>' +
-      '<p class="ops-cost-note">Bölümler GET api/v1/sales_lifecycle/proposal/{id} yanıtından okunur; boş bölüm uydurulmaz. Mesaj API’si yoksa Perfex sohbetini kullanın.</p>'
+      '<p class="ops-cost-note">Kabul yalnız accepted === true. items teklif kalemi, purchased PR/PO. Boş bölüm uydurulmaz.</p>'
     );
   }
 
@@ -1560,11 +1625,7 @@
     if (body) body.innerHTML = skeletonCards(6);
     setBanner('');
 
-    const [listRes, moRes, woRes] = await Promise.all([
-      fetchTeklifList(),
-      apiGet('api/mrp/manufacturing_orders'),
-      apiGet('api/mrp/work_orders'),
-    ]);
+    const listRes = await fetchTeklifList();
 
     if (!listRes.ok) {
       if (
@@ -1576,7 +1637,7 @@
       const msg = explainError(listRes.result);
       setBanner(
         msg +
-          ' Liste GET api/v1/sales_lifecycle?source=proposal ile çekilir; yoksa api/teklif ve api/proposals denenir. Uydurma kayıt yok.',
+          ' Liste GET api/v1/sales_lifecycle?source=proposal ile çekilir. Kabul yalnız accepted === true; açık status === 1. Uydurma kayıt yok.',
         'warn'
       );
       renderMetrics(null, { total: '—', accepted: '—', open: '—', overdue: '—' });
@@ -1588,59 +1649,43 @@
     }
 
     listSource = listRes.source || 'sales_lifecycle';
-    let items = listRes.items || [];
+    let items = (listRes.items || []).map(flattenLifecycleItem);
     lastListItems = items.slice();
-
-    const moOk = !!(moRes && moRes.ok && moRes.json != null);
-    const woOk = !!(woRes && woRes.ok && woRes.json != null);
-    const moRows = moOk ? unwrapRecords(moRes.json) : [];
-    const woRows = woOk ? unwrapRecords(woRes.json) : [];
-    const openTeklifIds = collectOpenTeklifIds(items, moRows, woRows);
 
     const metrics = {
       total: items.length,
       accepted: items.filter(isAccepted).length,
-      open: openTeklifIds.size,
+      open: items.filter(isOpenStatus).length,
       overdue: items.filter(isOverdue).length,
     };
     renderMetrics(null, metrics);
-
-    if (status === 'open' && openTeklifIds.size === 0 && !moOk && !woOk) {
-      const failed = (moRes && moRes.status !== 404 ? moRes : woRes) || moRes;
-      if (!items.some(hasLifecycleOpenJob)) {
-        setBanner(
-          explainError(failed) +
-            ' Açık işler sales_lifecycle open_jobs alanından veya GET api/mrp/manufacturing_orders eşlemesinden okunur; sahte kayıt yok.',
-          'warn'
-        );
-      }
-    }
 
     const q = String(query || '').trim().toLowerCase();
     let searchSource = listSource;
     if (q) {
       const remote = await searchTeklif(query);
       if (remote.ok && remote.items && remote.items.length) {
-        items = remote.items;
+        items = remote.items.map(flattenLifecycleItem);
         searchSource = 'search';
       } else {
         items = items.filter((item) => matchesQuery(item, q));
       }
     }
 
-    const filteredOpenIds = collectOpenTeklifIds(items, moRows, woRows);
-    items = filterByStatus(items, filteredOpenIds);
+    items = filterByStatus(items);
     items = sortTeklifIdDesc(items);
 
     const sliced = items.slice(offset, offset + LIMIT);
     const total = items.length;
-    const listMeta = { source: searchSource, openIds: filteredOpenIds };
+    const listMeta = { source: searchSource };
     if (status === 'open' && sliced.length === 0) {
-      listMeta.emptyHint =
-        'Açık iş (open_jobs veya tamamlanmamış manufacturing_orders) eşleşmedi. Sahte kayıt gösterilmez.';
+      listMeta.emptyHint = 'status === 1 olan açık teklif yok. MO/sevk var diye açık veya kabul sayılmaz.';
+    }
+    if (status === 'accepted' && sliced.length === 0) {
+      listMeta.emptyHint = 'accepted === true olan teklif yok. MO/sevk var diye kabul sayılmaz.';
     }
     renderList(sliced, total, listMeta);
-    setListTitle(total + ' kayıt · tıklayınca satınalma / depo / sevkiyat / kalite');
+    setListTitle(total + ' kayıt · tıklayınca satınalma / sevkiyat / MO');
   }
 
   async function openDetail(id) {
@@ -1653,7 +1698,7 @@
     setListTitle('Teklif çalışma alanı');
     if (el('opsSubtitle')) {
       el('opsSubtitle').textContent =
-        'Satınalma, depo, sevkiyat ve kalite' + (cachedBaseUrl ? ' · ' + cachedBaseUrl : '');
+        'Satınalma, sevkiyat ve MO' + (cachedBaseUrl ? ' · ' + cachedBaseUrl : '');
     }
     el('opsDetailPane').innerHTML =
       '<div class="ops-state ops-state-loading">Çalışma alanı yükleniyor…</div>';
@@ -1661,9 +1706,10 @@
     const fromList = (lastListItems || []).find((row) => String(itemId(row)) === String(id));
     const detailRes = await fetchTeklifDetail(id);
     let detail = detailRes.detail || fromList || selectedItem || { id: id };
-    if (detailRes.ok && detailRes.detail) detail = detailRes.detail;
+    if (detailRes.ok && detailRes.detail) detail = lifecycleRecord(detailRes.detail) || detailRes.detail;
 
     const rel = await loadRelatedForProposal(id, detail, detailRes.json || detail);
+    detailTab = pickDefaultTab(detail, rel);
     if (!detailRes.ok && detailRes.result && detailRes.result.status !== 404) {
       toast(explainError(detailRes.result), 'warn');
     }
@@ -1675,7 +1721,7 @@
       note.className = 'ops-banner ops-banner-warn';
       note.textContent =
         explainError(detailRes.result) +
-        ' Liste kaydı ve MRP uçları (MO, WO, sevkiyat, ürün, BOM) ile doldurulur.';
+        ' GET api/v1/sales_lifecycle/proposal/{id} okunamadı; sahte PR/PO veya sevk basılmaz.';
       if (host.firstChild) host.insertBefore(note, host.firstChild);
       else host.appendChild(note);
     }
