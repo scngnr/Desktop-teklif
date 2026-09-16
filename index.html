@@ -126,9 +126,9 @@ API: —</p>
         <section class="view view-operasyon" id="view-operasyon" hidden>
           <header class="ops-header">
             <div>
-              <p class="ops-kicker">Operasyon konsolu</p>
-              <h1 id="opsTitle">Kabul edilmiş teklifler</h1>
-              <p class="subtitle" id="opsSubtitle">Üretim, satınalma, sevkiyat ve maliyet</p>
+              <p class="ops-kicker">Satış yaşam döngüsü</p>
+              <h1 id="opsTitle">Tüm teklifler</h1>
+              <p class="subtitle" id="opsSubtitle">Açık işler, kabul edilmiş operasyonlar · satınalma, depo, sevkiyat, kalite</p>
             </div>
             <div class="ops-header-actions">
               <button type="button" class="btn-secondary" id="opsBtnBack" hidden>Listeye dön</button>
@@ -139,14 +139,10 @@ API: —</p>
           <div id="opsListPane" class="ops-list-pane">
             <div class="ops-toolbar">
               <input type="search" id="opsSearch" placeholder="Teklif no, müşteri veya konu ara…" autocomplete="off" spellcheck="false" />
-              <div class="ops-chips" id="opsStatusChips">
-                <button type="button" data-value="accepted" class="active" title="Kabul edilmiş teklifler">Kabul edilmiş</button>
-                <button type="button" data-value="open" title="Yalnızca açık üretim emri (MO) olan teklifler">Açık</button>
-                <button type="button" data-value="all" title="Tüm teklifler">Tümü</button>
-              </div>
-              <div class="ops-chips" id="opsScopeChips">
-                <button type="button" data-value="outstanding" class="active" title="Sunucu teklif listesi">Bekleyen</button>
-                <button type="button" data-value="ids" title="Bu cihazda oluşturulan teklifler">Yerel teklifler</button>
+              <div class="ops-chips" id="opsStatusChips" role="tablist" aria-label="Teklif filtresi">
+                <button type="button" data-value="all" class="active" title="API’den gelen tüm teklifler">Tümü</button>
+                <button type="button" data-value="open" title="Açık işi olan teklifler">Açık işler</button>
+                <button type="button" data-value="accepted" title="Kabul edilmiş teklifler">Kabul edilmiş</button>
               </div>
             </div>
             <div class="ops-banner" id="opsBanner" hidden></div>
