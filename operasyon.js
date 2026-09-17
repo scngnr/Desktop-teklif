@@ -2,27 +2,26 @@
  * Native Operasyon konsolu — JWT REST.
  * İstekler teklifApp.apiRequest (src/mrpApi.js) ile gider; kök ayarlardaki
  * Base URL / Giriş URL’den türetilir (host sabitlenmez).
- * Birincil liste: GET api/v1/sales_lifecycle?source=proposal (sayfalı, tüm teklifler).
- * Birincil detay: GET api/v1/sales_lifecycle/proposal/{id} (tüm bölümler).
- * Yedek: api/teklif, api/proposals ve MRP uçları. Sahte kayıt yok.
- * Filtre: Tümü / Açık işler / Kabul edilmiş + arama.
- * Kabul: yalnız data.accepted === true (MO/sevk var diye kabul sayılmaz).
- * Açık: status === 1. Başlık: data.title veya company / customer_name (customer obje).
- * KPI: data.counts.shipments / mos / purchased. İlk sekme: data.default_tab.
- * Sevk: data.shipments[] veya data.sections.shipments.rows[].
- * data.items teklif kalemidir, satınalma değil; purchased gerçek PR/PO.
+ * Liste: GET api/v1/sales_lifecycle/proposal?limit=200 (yoksa ?source=proposal).
+ * Detay: GET api/v1/sales_lifecycle/proposal/{id}.
+ * Kabul: accepted_n === 1 (JSON true karşılaştırması yetmez).
+ * Açık işler: open_job_n === 1 (kabul + bitmemiş MO/bekleyen sevk/açık kalite).
+ * status === 1 Perfex pipeline’dır; iş panosunda Açık iş değildir.
+ * KPI: data.kpi.* veya data.sevk / mo / satinalma / kalite / kalemler (dizi uzunluğu değil).
+ * Satır ürün adı: product / name / urun / description / code.
+ * Resim: images[].u + ?inline=1&authtoken=.
  */
 (function () {
   const LIMIT = 50;
-  const LIFE_PAGE = 100;
+  const LIFE_PAGE = 200;
   const LIFE_MAX_PAGES = 50;
   const TABS = [
-    { id: 'purchased', label: 'Satınalma' },
     { id: 'shipments', label: 'Sevkiyatlar' },
     { id: 'mo', label: "MO'lar" },
-    { id: 'items', label: 'Teklif kalemleri' },
-    { id: 'warehouse', label: 'Depodan alınan' },
     { id: 'quality', label: 'Kalite' },
+    { id: 'items', label: 'Teklif kalemleri' },
+    { id: 'purchased', label: 'Satınalma' },
+    { id: 'warehouse', label: 'Depodan alınan' },
   ];
 
   let status = 'all';
@@ -36,6 +35,7 @@
   let needSettingsHandler = null;
   let listSource = 'teklif';
   let cachedBaseUrl = '';
+  let cachedAuthToken = '';
   let lastListItems = [];
 
   function el(id) {
@@ -98,6 +98,7 @@
     try {
       const cfg = await window.teklifApp.getConfig();
       cachedBaseUrl = String((cfg && (cfg.apiRoot || cfg.baseUrl)) || '').replace(/\/+$/, '');
+      cachedAuthToken = String((cfg && cfg.authToken) || '');
     } catch {
       cachedBaseUrl = '';
     }
@@ -169,7 +170,9 @@
       obj.title ||
       obj.customer_name ||
       obj.accepted === true ||
-      obj.accepted === false
+      obj.accepted === false ||
+      obj.accepted_n != null ||
+      obj.open_job_n != null
     );
   }
 
@@ -208,34 +211,54 @@
     });
   }
 
+  function flagN(value) {
+    if (value === true || value === 1 || value === '1') return true;
+    const n = Number(value);
+    return Number.isFinite(n) && n === 1;
+  }
+
   function statusLabel(itemOrRaw) {
     if (itemOrRaw && typeof itemOrRaw === 'object') {
+      if (displayText(itemOrRaw.status_label)) return displayText(itemOrRaw.status_label);
       if (isAccepted(itemOrRaw)) return 'Kabul edilmiş';
-      if (isOpenStatus(itemOrRaw)) return 'Açık';
+      if (isOpenJob(itemOrRaw)) return 'Açık iş';
+      if (isPipeline(itemOrRaw)) return 'Pipeline';
       const raw = itemOrRaw.status_key || itemOrRaw.status_name || itemOrRaw.status;
       if (raw && typeof raw === 'object') return statusLabel(raw.name || raw.label || raw.key || '');
       return raw != null && raw !== '' ? String(raw) : '—';
     }
     const s = String(itemOrRaw == null ? '' : itemOrRaw).toLowerCase();
-    if (s === '1') return 'Açık';
     if (s === 'draft') return 'Taslak';
     if (s === '2' || s === 'sent') return 'Gönderildi';
     if (s === '4' || /revis/.test(s)) return 'Revize';
     if (s === '5' || /declin|red/.test(s)) return 'Reddedildi';
-    return itemOrRaw ? String(itemOrRaw) : '—';
+    return itemOrRaw != null && itemOrRaw !== '' ? String(itemOrRaw) : '—';
   }
 
   function isAccepted(item) {
     if (!item || typeof item !== 'object') return false;
     const root = lifecycleRecord(item) || item;
-    return root.accepted === true;
+    if (flagN(root.accepted_n)) return true;
+    if (root.accepted === true) return true;
+    if (flagN(root.accepted)) return true;
+    return false;
+  }
+
+  function isOpenJob(item) {
+    if (!item || typeof item !== 'object') return false;
+    const root = lifecycleRecord(item) || item;
+    return flagN(root.open_job_n) || root.open_job === true;
+  }
+
+  function isPipeline(item) {
+    if (!item || typeof item !== 'object') return false;
+    const root = lifecycleRecord(item) || item;
+    if (root.is_pipeline === true) return true;
+    return String(root.status_key || '').toLowerCase() === 'pipeline';
   }
 
   function isOpenStatus(item) {
-    if (!item || typeof item !== 'object') return false;
-    const root = lifecycleRecord(item) || item;
-    if (root.accepted === true) return false;
-    return Number(root.status) === 1 || String(root.status) === '1';
+    return isOpenJob(item);
   }
 
   function teklifSortId(item) {
@@ -323,6 +346,9 @@
         data.customer_name ||
         data.accepted === true ||
         data.accepted === false ||
+        data.accepted_n != null ||
+        data.open_job_n != null ||
+        data.kpi ||
         data.counts ||
         data.shipments ||
         data.sections ||
@@ -358,6 +384,75 @@
       );
     }
     return '';
+  }
+
+  function productName(row) {
+    if (!row || typeof row !== 'object') return '';
+    return (
+      displayText(row.product) ||
+      displayText(row.name) ||
+      displayText(row.urun) ||
+      displayText(row.description) ||
+      displayText(row.code) ||
+      displayText(row.product_name) ||
+      displayText(row.item)
+    );
+  }
+
+  function qtyOf(row) {
+    if (!row || typeof row !== 'object') return '—';
+    if (row.qty != null && row.qty !== '') return row.qty;
+    if (row.quantity != null && row.quantity !== '') return row.quantity;
+    return '—';
+  }
+
+  function rowStatus(row) {
+    if (!row || typeof row !== 'object') return '—';
+    return displayText(row.status_label) || displayText(row.status_key) || statusLabel(row);
+  }
+
+  function plateOf(row) {
+    return displayText(row.plate) || displayText(row.plaka) || '';
+  }
+
+  function waybillOf(row) {
+    return displayText(row.waybill_no) || displayText(row.irsaliye) || displayText(row.waybill) || '';
+  }
+
+  function withAuthQuery(url) {
+    if (!url) return '';
+    let u = String(url).trim();
+    if (!u) return '';
+    if (!/^https?:\/\//i.test(u) && !u.startsWith('data:')) {
+      if (u.charAt(0) !== '/') u = '/' + u;
+      u = (cachedBaseUrl || '') + u;
+    }
+    if (!/[?&]inline=/.test(u)) u += (u.indexOf('?') >= 0 ? '&' : '?') + 'inline=1';
+    if (cachedAuthToken && !/[?&]authtoken=/.test(u)) {
+      u += '&authtoken=' + encodeURIComponent(cachedAuthToken);
+    }
+    return u;
+  }
+
+  function firstImageUrl(row) {
+    if (!row || typeof row !== 'object') return '';
+    const images = row.images || row.files || row.photos;
+    if (Array.isArray(images) && images.length) {
+      const img = images[0];
+      if (typeof img === 'string') return img;
+      if (img && typeof img === 'object') {
+        return img.u || img.url || img.src || img.path || img.file || '';
+      }
+    }
+    return row.image || row.thumb || row.photo || '';
+  }
+
+  function thumbHtml(row) {
+    const raw = firstImageUrl(row);
+    if (!raw) return '—';
+    const src = withAuthQuery(raw);
+    if (!src) return '—';
+    return '<img class="ops-thumb" alt="" src="' + escapeHtml(src) + '" />';
   }
 
   function firstArray(obj, names) {
@@ -662,7 +757,7 @@
         status === 'accepted'
           ? 'Kabul edilmiş teklif yok'
           : status === 'open'
-            ? 'Açık işi olan teklif yok'
+            ? 'Açık iş yok'
             : 'Kayıt yok';
       const emptyBody = info.emptyHint
         ? info.emptyHint
@@ -680,7 +775,7 @@
           const subject = heading !== customer && customer !== '—' ? customer : itemNumber(item);
           const flags =
             (accepted ? '<span class="ops-flag ops-flag-ok">Kabul</span>' : '') +
-            (openJob ? '<span class="ops-flag ops-flag-open">Açık</span>' : '');
+            (openJob ? '<span class="ops-flag ops-flag-open">Açık iş</span>' : '');
           return (
             '<article class="ops-card" data-id="' +
             escapeHtml(id) +
@@ -822,7 +917,7 @@
     }
     if (sub) {
       const host = cachedBaseUrl ? ' · ' + cachedBaseUrl : '';
-      sub.textContent = (text || 'Açık işler, kabul edilmiş operasyonlar · satınalma, depo, sevkiyat, kalite') + host;
+      sub.textContent = (text || 'Açık işler: open_job_n · Kabul: accepted_n') + host;
     }
   }
 
@@ -866,7 +961,10 @@
     return Object.assign({}, nested, rec, {
       id: rec.id || nested.id || nested.proposal_id,
       status: rec.status != null && rec.status !== '' ? rec.status : nested.status,
-      accepted: rec.accepted === true ? true : nested.accepted === true ? true : rec.accepted,
+      accepted: rec.accepted != null ? rec.accepted : nested.accepted,
+      accepted_n: rec.accepted_n != null ? rec.accepted_n : nested.accepted_n,
+      open_job_n: rec.open_job_n != null ? rec.open_job_n : nested.open_job_n,
+      is_pipeline: rec.is_pipeline != null ? rec.is_pipeline : nested.is_pipeline,
       title: rec.title || nested.title,
       company: rec.company != null ? rec.company : nested.company,
       customer_name: rec.customer_name || nested.customer_name,
@@ -887,32 +985,20 @@
     return Number.isFinite(n) ? n : pageLen;
   }
 
-  async function fetchAllLifecycleProposals() {
+  async function fetchLifecyclePages(basePath, extraParams) {
     let offset = 0;
     let all = [];
     let last = null;
     let pages = 0;
-    let path = 'api/v1/sales_lifecycle';
+    let path = basePath;
     while (pages < LIFE_MAX_PAGES) {
-      path = 'api/v1/sales_lifecycle' + queryString({ source: 'proposal', limit: LIFE_PAGE, offset: offset });
+      path = basePath + queryString(Object.assign({ limit: LIFE_PAGE, offset: offset }, extraParams || {}));
       const result = await apiGet(path);
       last = result;
       if (result && (result.status === 401 || result.status === 403)) {
         return { ok: false, result, items: [], source: 'sales_lifecycle', path: path };
       }
       if (!result || !result.ok) {
-        if (offset === 0 && result && result.status === 404) {
-          const alt = await apiGet('api/v1/sales_lifecycle/proposal');
-          if (alt && alt.ok && alt.json != null) {
-            return {
-              ok: true,
-              result: alt,
-              items: unwrapLifecycleList(alt.json).map(flattenLifecycleItem),
-              source: 'sales_lifecycle',
-              path: 'api/v1/sales_lifecycle/proposal',
-            };
-          }
-        }
         if (offset === 0) return { ok: false, result, items: [], source: 'sales_lifecycle', path: path };
         break;
       }
@@ -924,6 +1010,18 @@
       offset += LIFE_PAGE;
     }
     return { ok: true, result: last, items: all, source: 'sales_lifecycle', path: path };
+  }
+
+  async function fetchAllLifecycleProposals() {
+    const primary = await fetchLifecyclePages('api/v1/sales_lifecycle/proposal', {});
+    if (primary && primary.result && (primary.result.status === 401 || primary.result.status === 403)) {
+      return primary;
+    }
+    if (primary && primary.ok && primary.items && primary.items.length) return primary;
+    const fallback = await fetchLifecyclePages('api/v1/sales_lifecycle', { source: 'proposal' });
+    if (fallback && fallback.ok && fallback.items && fallback.items.length) return fallback;
+    if (primary && primary.ok) return primary;
+    return fallback && fallback.result ? fallback : primary;
   }
 
   async function fetchLifecycleDetail(id) {
@@ -1033,11 +1131,16 @@
     return { ok: false, result: last, detail: null, json: null, path: paths[0] };
   }
 
-  function lineItemsFrom(detail) {
+  function collectLineItems(detail) {
     const root = lifecycleRecord(detail) || detail;
     if (!root || typeof root !== 'object') return [];
-    if (Array.isArray(root.items)) return root.items;
-    return [];
+    if (Array.isArray(root.items) && root.items.length) return root.items;
+    const alt = pickSection(root, ['itemable', 'tblitemable', 'get_items_by_type', 'kalemler']);
+    return alt;
+  }
+
+  function lineItemsFrom(detail) {
+    return collectLineItems(detail);
   }
 
   function indexBy(rows, keys) {
@@ -1066,10 +1169,14 @@
       root &&
       (root.accepted === true ||
         root.accepted === false ||
+        root.accepted_n != null ||
+        root.open_job_n != null ||
+        root.kpi ||
         root.counts ||
         root.sections ||
         root.shipments ||
         root.purchased ||
+        root.items ||
         root.default_tab ||
         root.title)
     );
@@ -1079,7 +1186,7 @@
     const lifeShips = sectionRows(root, 'shipments');
     const lifeQuality = pickSection(root, ['quality', 'quality_ops', 'qc', 'kalite']);
     const lifeMos = pickSection(root, ['mos', 'manufacturing_orders']);
-    const lifeItems = Array.isArray(root.items) ? root.items : [];
+    const lifeItems = collectLineItems(root);
 
     if (hasLifecycle) {
       return {
@@ -1103,6 +1210,7 @@
         bom: { ok: true, result: null },
         lines: lifeItems,
         counts: root.counts && typeof root.counts === 'object' ? root.counts : {},
+        kpi: root.kpi && typeof root.kpi === 'object' ? root.kpi : {},
         defaultTab: root.default_tab,
         lifeJson: root,
       };
@@ -1142,6 +1250,7 @@
       bom: { ok: false, result: null },
       lines: lineItemsFrom(detail),
       counts: {},
+      kpi: {},
       defaultTab: '',
       lifeJson: root,
     };
@@ -1177,13 +1286,7 @@
 
   function catalogRow(row, kind) {
     return {
-      name:
-        displayText(row.product) ||
-        displayText(row.description) ||
-        displayText(row.name) ||
-        displayText(row.item) ||
-        displayText(row.product_name) ||
-        itemNumber(row),
+      name: productName(row) || itemNumber(row),
       vendor:
         displayText(row.vendor) ||
         displayText(row.supplier) ||
@@ -1223,16 +1326,28 @@
     return (rel.quality || []).map((row) => catalogRow(row, 'Kalite'));
   }
 
+  function pickKpiNumber(root, names) {
+    const kpi = root && root.kpi && typeof root.kpi === 'object' ? root.kpi : {};
+    for (let i = 0; i < names.length; i++) {
+      const key = names[i];
+      const fromKpi = kpi[key];
+      if (fromKpi != null && typeof fromKpi !== 'object') return fromKpi;
+      const fromRoot = root && root[key];
+      if (fromRoot != null && typeof fromRoot !== 'object') return fromRoot;
+    }
+    return '—';
+  }
+
   function lifecycleCounts(detail, rel) {
     const root = lifecycleRecord(detail) || detail || {};
-    const c = (rel && rel.counts) || root.counts;
-    if (!c || typeof c !== 'object') {
-      return { shipments: '—', mos: '—', purchased: '—' };
-    }
+    const merged = Object.assign({}, root, rel && rel.kpi ? { kpi: rel.kpi } : {});
+    if (rel && rel.kpi) merged.kpi = rel.kpi;
     return {
-      shipments: c.shipments != null ? c.shipments : '—',
-      mos: c.mos != null ? c.mos : '—',
-      purchased: c.purchased != null ? c.purchased : '—',
+      shipments: pickKpiNumber(merged, ['shipments', 'sevk']),
+      mos: pickKpiNumber(merged, ['mos', 'mo']),
+      purchased: pickKpiNumber(merged, ['purchased', 'satinalma']),
+      quality: pickKpiNumber(merged, ['quality', 'kalite']),
+      items: pickKpiNumber(merged, ['items', 'kalemler']),
     };
   }
 
@@ -1327,39 +1442,18 @@
   }
 
   function renderMoPanel(rel) {
-    const hasMo = rel.mo.ok || (rel.mos && rel.mos.length);
-    const hasWo = rel.wo.ok || (rel.wos && rel.wos.length);
-    if (!hasMo && !hasWo) {
-      return sectionUnavailable("MO'lar yüklenemedi", (rel.mo && rel.mo.result) || (rel.wo && rel.wo.result));
-    }
-    const moRows = (rel.mos || []).map((m) => [
-      escapeHtml(itemNumber(m)),
-      escapeHtml(m.product || m.description || m.name || '—'),
-      escapeHtml(statusLabel(m.status || m.state)),
-      escapeHtml(m.qty != null ? m.qty : m.quantity != null ? m.quantity : '—'),
-      escapeHtml(fmtDate(m.date || m.date_start || m.updated_at || m.created_at)),
+    const list = rel.mos || [];
+    const rows = list.map((m) => [
+      thumbHtml(m),
+      escapeHtml(productName(m) || displayText(m.code) || itemNumber(m)),
+      escapeHtml(qtyOf(m)),
+      escapeHtml(rowStatus(m)),
     ]);
-    const woRows = (rel.wos || []).map((w) => [
-      escapeHtml(itemNumber(w)),
-      escapeHtml(w.product || w.description || w.name || '—'),
-      escapeHtml(statusLabel(w.status || w.state) + (isExternalWo(w) ? ' · dış' : '')),
-      escapeHtml(fmtDate(w.date || w.date_created || w.updated_at)),
-    ]);
-    const emptyMo =
-      rel.mo.ok && (rel.mosAll || []).length && !(rel.mos || []).length
-        ? 'MO listesi geldi; bu teklifle eşleşen proposal_id / rel_id kaydı yok.'
-        : 'Kabul edilmiş teklif için manufacturing_orders kaydı bulunamadı.';
-    return (
-      tableHtml(['MO', 'Ürün', 'Durum', 'Miktar', 'Tarih'], moRows, 'Bu teklife bağlı üretim emri yok', emptyMo) +
-      (rel.wo.ok || woRows.length
-        ? '<h3 class="ops-msg-title">İş emirleri</h3>' +
-          tableHtml(
-            ['İş emri', 'Ürün', 'Durum', 'Tarih'],
-            woRows,
-            'Bu teklife bağlı iş emri yok',
-            'work_orders listesi boş veya teklif ile ilişki alanı yok.'
-          )
-        : '')
+    return tableHtml(
+      ['Resim', 'Ürün', 'Miktar', 'Durum'],
+      rows,
+      'Üretim emri yok',
+      'sections.mos.rows boş. Sahte MO üretilmez.'
     );
   }
 
@@ -1416,32 +1510,30 @@
       );
     }
     const rows = list.map((m) => [
-      escapeHtml(m.name),
-      escapeHtml(m.status || '—'),
-      escapeHtml(m.extra || '—'),
-      escapeHtml(m.vendor),
-      escapeHtml(fmtDate(m.date)),
+      thumbHtml(m),
+      escapeHtml(productName(m) || displayText(m.name) || '—'),
+      escapeHtml(rowStatus(m)),
     ]);
     return tableHtml(
-      ['Operasyon / ürün', 'Sonuç', 'Not / lot', 'Sorumlu', 'Tarih'],
+      ['Resim', 'Ad', 'Durum'],
       rows,
       'Kalite operasyonu yok',
-      ''
+      'sections.quality.rows boş. Sahte muayene kaydı gösterilmez.'
     );
   }
 
   function renderShipmentsPanel(rel) {
     const list = rel.ships || [];
     const rows = list.map((s) => [
-      escapeHtml(displayText(s.product) || displayText(s.description) || itemNumber(s)),
-      escapeHtml(s.qty != null ? s.qty : s.quantity != null ? s.quantity : '—'),
-      escapeHtml(displayText(s.plate) || '—'),
-      escapeHtml(displayText(s.waybill_no) || displayText(s.waybill) || '—'),
-      escapeHtml(displayText(s.status_key) || statusLabel(s)),
-      escapeHtml(shippedLabel(s.shipped)),
+      thumbHtml(s),
+      escapeHtml(productName(s) || itemNumber(s)),
+      escapeHtml(qtyOf(s)),
+      escapeHtml(rowStatus(s)),
+      escapeHtml(plateOf(s) || '—'),
+      escapeHtml(waybillOf(s) || '—'),
     ]);
     return tableHtml(
-      ['Ürün', 'Miktar', 'Plaka', 'İrsaliye', 'Durum', 'Sevk'],
+      ['Resim', 'Ürün', 'Miktar', 'Durum', 'Plaka', 'İrsaliye'],
       rows,
       'Sevkiyat kaydı yok',
       'data.shipments veya data.sections.shipments.rows boş. Sahte sevk üretilmez.'
@@ -1450,22 +1542,16 @@
 
   function renderItemsPanel(rel, detail) {
     const lines = (rel.lines && rel.lines.length ? rel.lines : lineItemsFrom(detail)) || [];
-    const rows = lines.map((line) => {
-      const qty = line.qty != null ? line.qty : line.quantity != null ? line.quantity : '—';
-      const rate = numField(line, ['rate', 'price', 'unit_price']);
-      const amount = numField(line, ['amount', 'total', 'line_total']);
-      return [
-        escapeHtml(displayText(line.description) || displayText(line.name) || displayText(line.product) || itemNumber(line)),
-        escapeHtml(qty),
-        fmtMoney(rate),
-        fmtMoney(amount),
-      ];
-    });
+    const rows = lines.map((line) => [
+      thumbHtml(line),
+      escapeHtml(productName(line) || displayText(line.description) || displayText(line.name) || itemNumber(line)),
+      escapeHtml(qtyOf(line)),
+    ]);
     return tableHtml(
-      ['Açıklama', 'Miktar', 'Birim fiyat', 'Tutar'],
+      ['Resim', 'Açıklama', 'Miktar'],
       rows,
       'Teklif kalemi yok',
-      'data.items teklif kalemleridir; satınalma (purchased) değildir.'
+      'data.items (get_items_by_type / tblitemable) boş. Sahte kalem üretilmez.'
     );
   }
 
@@ -1598,6 +1684,8 @@
       kpi('Sevkiyat', counts.shipments) +
       kpi('MO', counts.mos) +
       kpi('Satınalma', counts.purchased) +
+      kpi('Kalite', counts.quality) +
+      kpi('Kalem', counts.items) +
       '</div>' +
       '<nav class="ops-tabs" id="opsTabs">' +
       tabs +
@@ -1614,7 +1702,7 @@
           '</section>'
       ).join('') +
       '</div>' +
-      '<p class="ops-cost-note">Kabul yalnız accepted === true. items teklif kalemi, purchased PR/PO. Boş bölüm uydurulmaz.</p>'
+      '<p class="ops-cost-note">Açık iş = open_job_n. Kabul = accepted_n. KPI data.kpi (dizi uzunluğu değil). Ürün adı product / name / urun / description.</p>'
     );
   }
 
@@ -1637,7 +1725,7 @@
       const msg = explainError(listRes.result);
       setBanner(
         msg +
-          ' Liste GET api/v1/sales_lifecycle?source=proposal ile çekilir. Kabul yalnız accepted === true; açık status === 1. Uydurma kayıt yok.',
+          ' Liste GET api/v1/sales_lifecycle/proposal?limit=200. Açık iş: open_job_n === 1. Kabul: accepted_n === 1. Uydurma kayıt yok.',
         'warn'
       );
       renderMetrics(null, { total: '—', accepted: '—', open: '—', overdue: '—' });
@@ -1679,10 +1767,10 @@
     const total = items.length;
     const listMeta = { source: searchSource };
     if (status === 'open' && sliced.length === 0) {
-      listMeta.emptyHint = 'status === 1 olan açık teklif yok. MO/sevk var diye açık veya kabul sayılmaz.';
+      listMeta.emptyHint = 'open_job_n === 1 olan açık iş yok (kabul + bitmemiş MO / bekleyen sevk / açık kalite). status === 1 pipeline’dır, iş panosu değildir.';
     }
     if (status === 'accepted' && sliced.length === 0) {
-      listMeta.emptyHint = 'accepted === true olan teklif yok. MO/sevk var diye kabul sayılmaz.';
+      listMeta.emptyHint = 'accepted_n === 1 olan teklif yok. JSON true karşılaştırması kullanılmaz.';
     }
     renderList(sliced, total, listMeta);
     setListTitle(total + ' kayıt · tıklayınca satınalma / sevkiyat / MO');

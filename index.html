@@ -2,7 +2,7 @@
 <html lang="tr">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: https: http:" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Desktop Teklif</title>
   <link rel="stylesheet" href="styles.css" />
@@ -128,7 +128,7 @@ API: —</p>
             <div>
               <p class="ops-kicker">Satış yaşam döngüsü</p>
               <h1 id="opsTitle">Tüm teklifler</h1>
-              <p class="subtitle" id="opsSubtitle">Kabul: accepted === true · Açık: status === 1 · satınalma / sevkiyat / MO</p>
+              <p class="subtitle" id="opsSubtitle">Açık işler: open_job_n · Kabul: accepted_n · pipeline iş panosunda değil</p>
             </div>
             <div class="ops-header-actions">
               <button type="button" class="btn-secondary" id="opsBtnBack" hidden>Listeye dön</button>
@@ -141,8 +141,8 @@ API: —</p>
               <input type="search" id="opsSearch" placeholder="Teklif no, müşteri veya konu ara…" autocomplete="off" spellcheck="false" />
               <div class="ops-chips" id="opsStatusChips" role="tablist" aria-label="Teklif filtresi">
                 <button type="button" data-value="all" class="active" title="API’den gelen tüm teklifler">Tümü</button>
-                <button type="button" data-value="open" title="status === 1 olan teklifler">Açık işler</button>
-                <button type="button" data-value="accepted" title="Yalnız accepted === true">Kabul edilmiş</button>
+                <button type="button" data-value="open" title="Kabul edilmiş + bitmemiş MO / bekleyen sevk / açık kalite (open_job_n)">Açık işler</button>
+                <button type="button" data-value="accepted" title="accepted_n === 1">Kabul edilmiş</button>
               </div>
             </div>
             <div class="ops-banner" id="opsBanner" hidden></div>
