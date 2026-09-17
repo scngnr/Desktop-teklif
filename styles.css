@@ -1226,43 +1226,9 @@ button:disabled {
   color: #79b8ff;
 }
 
-.ops-ship-group {
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  margin-bottom: 12px;
-  overflow: hidden;
-  background: rgba(21, 28, 39, 0.35);
-}
-
-.ops-ship-group.is-combine {
-  border-color: rgba(63, 185, 80, 0.35);
-}
-
-.ops-ship-group-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  background: rgba(139, 156, 179, 0.08);
-  font-size: 0.82rem;
-}
-
-.ops-ship-group.is-combine .ops-ship-group-head {
-  background: rgba(63, 185, 80, 0.1);
-}
-
-.ops-ship-group-head span {
+.ops-badge-muted {
+  background: rgba(139, 156, 179, 0.16);
   color: var(--muted);
-}
-
-.ops-ship-group .ops-table-wrap {
-  border: none;
-  border-radius: 0;
-}
-
-.ops-ship-group .ops-cost-note {
-  margin: 8px 12px 0;
 }
 
 .ops-detail,
