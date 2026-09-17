@@ -53,6 +53,15 @@ function buildAdminRoot(baseUrl, firmaAdi) {
   return `${base}/admin`;
 }
 
+/**
+ * SaaS tenant REST kökü — Giriş URL'den türetilir (adminRoot eksi /admin).
+ * firma set → {base}/{firma}/ps   |  firma boş → {base}
+ * İstekler: {apiRoot}/api/...
+ */
+function buildApiRoot(baseUrl, firmaAdi) {
+  return buildAdminRoot(baseUrl, firmaAdi).replace(/\/admin\/?$/, '');
+}
+
 function load() {
   try {
     const file = settingsPath();
@@ -127,6 +136,7 @@ function getPublic() {
     baseUrl: runtime.baseUrl,
     firmaAdi: runtime.firmaAdi,
     adminRoot: buildAdminRoot(runtime.baseUrl, runtime.firmaAdi),
+    apiRoot: buildApiRoot(runtime.baseUrl, runtime.firmaAdi),
     authToken: runtime.authToken,
     hasAuthToken: hasAuthToken(),
     apiBaseUrl: runtime.apiBaseUrl,
@@ -144,6 +154,7 @@ module.exports = {
   getPublic,
   hasAuthToken,
   buildAdminRoot,
+  buildApiRoot,
   normalizeFirmaAdi,
   DEFAULTS,
 };

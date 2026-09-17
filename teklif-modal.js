@@ -12,6 +12,7 @@ let toastTimer = null;
 let companiesCache = [];
 let customersLoading = false;
 let creatingTeklif = false;
+let createInFlight = false;
 let previewTeklifNo = 'teklif-no';
 
 function showToast(message, kind = 'info', durationMs = 4200, action = null) {
@@ -206,38 +207,46 @@ function getCreatePayload() {
 }
 
 function setBusy(busy) {
-  creatingTeklif = busy;
+  creatingTeklif = !!busy;
   btnConfirmOk.disabled = busy;
   btnConfirmCancel.disabled = busy;
-  btnConfirmOk.textContent = busy ? 'Oluşturuluyor…' : 'Oluştur';
+  btnConfirmOk.classList.toggle('is-busy', busy);
+  btnConfirmOk.setAttribute('aria-busy', busy ? 'true' : 'false');
+  const spinner = btnConfirmOk.querySelector('.btn-spinner');
+  const labelEl = btnConfirmOk.querySelector('.btn-label');
+  if (spinner) spinner.hidden = !busy;
+  if (labelEl) labelEl.textContent = busy ? 'Oluşturuluyor…' : 'Oluştur';
+  else btnConfirmOk.textContent = busy ? 'Oluşturuluyor…' : 'Oluştur';
   if (window.teklifModal.setDesktopFabBusy) {
     window.teklifModal.setDesktopFabBusy(busy);
   }
 }
 
 async function createTeklifAction(payload = {}) {
-  if (creatingTeklif) return;
+  if (createInFlight) return;
+  createInFlight = true;
+  if (!creatingTeklif) setBusy(true);
 
-  const cfg = await window.teklifModal.getConfig();
-  if (!cfg || !cfg.hasAuthToken) {
-    showToast('Önce Ayarlar’dan JWT token girin.', 'err');
-    return;
-  }
-
-  const license = await window.teklifModal.checkLicense();
-  if (!license || !license.licensed) {
-    showToast(
-      'Lisans aktif değil. Teklif butonu yalnızca lisanslı cihazda açılır.',
-      'err',
-      6500
-    );
-    return;
-  }
-
-  setBusy(true);
-  showToast('API kaydı ve klasör oluşturuluyor…', 'info', 6000);
-
+  let keepBusyOnSuccess = false;
   try {
+    const cfg = await window.teklifModal.getConfig();
+    if (!cfg || !cfg.hasAuthToken) {
+      showToast('Önce Ayarlar’dan JWT token girin.', 'err');
+      return;
+    }
+
+    const license = await window.teklifModal.checkLicense();
+    if (!license || !license.licensed) {
+      showToast(
+        'Lisans aktif değil. Teklif butonu yalnızca lisanslı cihazda açılır.',
+        'err',
+        6500
+      );
+      return;
+    }
+
+    showToast('API kaydı ve klasör oluşturuluyor…', 'info', 6000);
+
     const result = await window.teklifModal.createTeklif(payload);
     if (!result.ok) {
       showToast('Hata: ' + result.error, 'err', 6500);
@@ -259,11 +268,15 @@ async function createTeklifAction(payload = {}) {
           }
         : null
     );
+    keepBusyOnSuccess = true;
     setTimeout(() => window.teklifModal.close(), 1600);
   } catch (err) {
     showToast('Beklenmeyen hata: ' + (err.message || err), 'err', 6500);
   } finally {
-    setBusy(false);
+    if (!keepBusyOnSuccess) {
+      createInFlight = false;
+      setBusy(false);
+    }
   }
 }
 
@@ -283,8 +296,13 @@ selectCustomer.addEventListener('change', () => {
 selectContact.addEventListener('change', updateFolderPreview);
 inputProjectName.addEventListener('input', updateFolderPreview);
 
-btnConfirmCancel.addEventListener('click', () => closeModal());
+btnConfirmCancel.addEventListener('click', () => {
+  if (creatingTeklif) return;
+  closeModal();
+});
 btnConfirmOk.addEventListener('click', () => {
+  if (creatingTeklif) return;
+  setBusy(true);
   createTeklifAction(getCreatePayload());
 });
 
