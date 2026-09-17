@@ -419,6 +419,201 @@
     return displayText(row.waybill_no) || displayText(row.irsaliye) || displayText(row.waybill) || '';
   }
 
+  function orderCodeOf(row) {
+    if (!row || typeof row !== 'object') return '';
+    const candidates = [
+      row.order_code,
+      row.siparis_kodu,
+      row.siparis_no,
+      row.proposal_number,
+      row.formatted_number,
+      row.order_number,
+      row.rel_number,
+      row.number,
+      row.mo_number,
+      row.code,
+      row.reference,
+    ];
+    for (let i = 0; i < candidates.length; i++) {
+      const s = displayText(candidates[i]);
+      if (!s) continue;
+      return s.split(/-#MO[_-]?/i)[0].trim() || s;
+    }
+    const n = itemNumber(row);
+    if (!n || n === '—') return '';
+    return n.split(/-#MO[_-]?/i)[0].trim();
+  }
+
+  function companyOf(row) {
+    if (!row || typeof row !== 'object') return '';
+    return (
+      displayText(row.company) ||
+      displayText(row.customer_name) ||
+      displayText(row.customer) ||
+      displayText(row.client) ||
+      displayText(row.client_company) ||
+      ''
+    );
+  }
+
+  function finishRaw(row) {
+    if (!row || typeof row !== 'object') return '';
+    return (
+      row.date_finished ||
+      row.finished_at ||
+      row.date_done ||
+      row.completed_at ||
+      row.ready_at ||
+      row.date_end ||
+      row.ship_date ||
+      row.date ||
+      row.updated_at ||
+      row.created_at ||
+      ''
+    );
+  }
+
+  function finishDay(row) {
+    const raw = finishRaw(row);
+    if (!raw) return '';
+    const d = new Date(raw);
+    if (!Number.isNaN(d.getTime())) {
+      return (
+        d.getFullYear() +
+        '-' +
+        String(d.getMonth() + 1).padStart(2, '0') +
+        '-' +
+        String(d.getDate()).padStart(2, '0')
+      );
+    }
+    return String(raw).slice(0, 10);
+  }
+
+  function formatDay(day) {
+    if (!day) return '';
+    const p = String(day).split('-');
+    if (p.length === 3) return p[2] + '.' + p[1] + '.' + p[0];
+    return day;
+  }
+
+  function isTransmitted(row) {
+    if (!row || typeof row !== 'object') return false;
+    const direct =
+      row.transmitted ??
+      row.iletildi ??
+      row.notified ??
+      row.accounting_notified ??
+      row.sent_to_accounting ??
+      row.muhasebe_iletildi;
+    if (direct === true || direct === 1 || direct === '1') return true;
+    if (direct === false || direct === 0 || direct === '0') return false;
+    const blob = [
+      row.transmit_label,
+      row.iletildi_label,
+      row.notify_status,
+      row.accounting_status,
+      row.notified_label,
+      row.status_label,
+    ]
+      .map(displayText)
+      .join(' ')
+      .toLowerCase();
+    if (/iletilmedi/.test(blob)) return false;
+    if (/iletildi/.test(blob)) return true;
+    return false;
+  }
+
+  function transmitLabel(row) {
+    const orig =
+      displayText(row.transmit_label) ||
+      displayText(row.iletildi_label) ||
+      displayText(row.notify_status) ||
+      displayText(row.accounting_status);
+    if (orig) return orig;
+    if (isTransmitted(row)) {
+      const q = qtyOf(row);
+      return q && q !== '—' ? 'İletildi : ' + q : 'İletildi';
+    }
+    return 'İletilmedi';
+  }
+
+  function combineKey(row) {
+    return [
+      (orderCodeOf(row) || '—').toLowerCase(),
+      (companyOf(row) || '—').toLowerCase(),
+      finishDay(row) || 'nodate',
+      isTransmitted(row) ? 'tx' : 'pending',
+    ].join('\u0001');
+  }
+
+  function groupForCombinedShipment(list) {
+    const map = new Map();
+    (list || []).forEach((row) => {
+      const key = combineKey(row);
+      if (!map.has(key)) {
+        map.set(key, {
+          key: key,
+          rows: [],
+          order: orderCodeOf(row),
+          company: companyOf(row),
+          day: finishDay(row),
+          transmitted: isTransmitted(row),
+        });
+      }
+      map.get(key).rows.push(row);
+    });
+    const groups = Array.from(map.values());
+    groups.forEach((g) => {
+      g.combinable = g.rows.length >= 2 && !g.transmitted;
+      g.hasSibling = groups.some(
+        (o) => o !== g && o.order && o.order === g.order && o.company === g.company
+      );
+    });
+    groups.sort((a, b) => {
+      if (a.combinable !== b.combinable) return a.combinable ? -1 : 1;
+      return String(b.day || '').localeCompare(String(a.day || ''));
+    });
+    return groups;
+  }
+
+  function renderGroupedOps(list, headers, rowCells, emptyTitle, emptyBody) {
+    if (!list || !list.length) return stateHtml('empty', emptyTitle, emptyBody);
+    const groups = groupForCombinedShipment(list);
+    return groups
+      .map((g) => {
+        const badge = g.combinable
+          ? '<span class="ops-badge ops-badge-ok">Birleşik sevkiyat · ' +
+            escapeHtml(String(g.rows.length)) +
+            ' ürün</span>'
+          : '<span class="ops-badge ops-badge-muted">Birleşik değil</span>';
+        let why = '';
+        if (!g.combinable && g.hasSibling) {
+          why = g.transmitted
+            ? 'Aynı sipariş ve firma; muhasebeye iletildi veya farklı günde bitti — birleşik sevk uygun değil.'
+            : 'Aynı sipariş ve firma; bitiş günü farklı — birleşik sevk uygun değil.';
+        }
+        const tableRows = g.rows.map(rowCells);
+        return (
+          '<article class="ops-ship-group' +
+          (g.combinable ? ' is-combine' : ' is-solo') +
+          '">' +
+          '<header class="ops-ship-group-head">' +
+          '<div><strong>' +
+          escapeHtml(g.order || 'Sipariş') +
+          '</strong><span> · ' +
+          escapeHtml(g.company || '—') +
+          (g.day ? ' · ' + escapeHtml(formatDay(g.day)) : '') +
+          '</span></div>' +
+          badge +
+          '</header>' +
+          (why ? '<p class="ops-cost-note">' + escapeHtml(why) + '</p>' : '') +
+          tableHtml(headers, tableRows, emptyTitle, '') +
+          '</article>'
+        );
+      })
+      .join('');
+  }
+
   function withAuthQuery(url) {
     if (!url) return '';
     let u = String(url).trim();
@@ -1443,15 +1638,20 @@
 
   function renderMoPanel(rel) {
     const list = rel.mos || [];
-    const rows = list.map((m) => [
-      thumbHtml(m),
-      escapeHtml(productName(m) || displayText(m.code) || itemNumber(m)),
-      escapeHtml(qtyOf(m)),
-      escapeHtml(rowStatus(m)),
-    ]);
-    return tableHtml(
-      ['Resim', 'Ürün', 'Miktar', 'Durum'],
-      rows,
+    return renderGroupedOps(
+      list,
+      ['Resim', 'Kod', 'Ürün', 'Miktar', 'Durum', 'İletim', 'Tarih'],
+      function (m) {
+        return [
+          thumbHtml(m),
+          escapeHtml(itemNumber(m)),
+          escapeHtml(productName(m) || displayText(m.code) || '—'),
+          escapeHtml(qtyOf(m)),
+          escapeHtml(rowStatus(m)),
+          escapeHtml(transmitLabel(m)),
+          escapeHtml(fmtDate(finishRaw(m))),
+        ];
+      },
       'Üretim emri yok',
       'sections.mos.rows boş. Sahte MO üretilmez.'
     );
@@ -1523,18 +1723,22 @@
   }
 
   function renderShipmentsPanel(rel) {
-    const list = rel.ships || [];
-    const rows = list.map((s) => [
-      thumbHtml(s),
-      escapeHtml(productName(s) || itemNumber(s)),
-      escapeHtml(qtyOf(s)),
-      escapeHtml(rowStatus(s)),
-      escapeHtml(plateOf(s) || '—'),
-      escapeHtml(waybillOf(s) || '—'),
-    ]);
-    return tableHtml(
-      ['Resim', 'Ürün', 'Miktar', 'Durum', 'Plaka', 'İrsaliye'],
-      rows,
+    const list = rel.ships && rel.ships.length ? rel.ships : rel.mos || [];
+    return renderGroupedOps(
+      list,
+      ['Resim', 'Ürün', 'Miktar', 'Durum', 'Plaka', 'İrsaliye', 'İletim', 'Tarih'],
+      function (s) {
+        return [
+          thumbHtml(s),
+          escapeHtml(productName(s) || itemNumber(s)),
+          escapeHtml(qtyOf(s)),
+          escapeHtml(rowStatus(s)),
+          escapeHtml(plateOf(s) || '—'),
+          escapeHtml(waybillOf(s) || '—'),
+          escapeHtml(transmitLabel(s)),
+          escapeHtml(fmtDate(finishRaw(s))),
+        ];
+      },
       'Sevkiyat kaydı yok',
       'data.shipments veya data.sections.shipments.rows boş. Sahte sevk üretilmez.'
     );
@@ -1702,7 +1906,7 @@
           '</section>'
       ).join('') +
       '</div>' +
-      '<p class="ops-cost-note">Açık iş = open_job_n. Kabul = accepted_n. KPI data.kpi (dizi uzunluğu değil). Ürün adı product / name / urun / description.</p>'
+      '<p class="ops-cost-note">Birleşik sevk: aynı sipariş + firma + bitiş günü + iletilmedi. Farklı gün veya iletildi satırlar ayrı kalır.</p>'
     );
   }
 
