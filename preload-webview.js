@@ -1,10 +1,12 @@
 /**
  * MRP (Perfex) webview guest preload — PR #12 masaüstü menü köprüsü.
  * Tema `window.desktopTeklif` veya desktop-teklif:// linkleri kullanabilir.
+ * Kesim sekmesi `window.mrpDesktop.metalixOrd` ya da `mrp-metalix-ord` olayını arar.
  */
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webFrame } = require('electron');
 const {
   isMetalixSendLabel,
+  metalixBridgePayload,
   moIdFromPageUrl,
   normalizeMetalixGroup,
 } = require('./src/metalixOrd');
@@ -12,7 +14,11 @@ const {
 function sendAction(action, extra) {
   const slug = String(action || '').trim();
   if (!slug) return;
-  ipcRenderer.sendToHost('desktop-action', slug, extra == null ? null : extra);
+  try {
+    ipcRenderer.sendToHost('desktop-action', slug, extra == null ? null : extra);
+  } catch {
+    // konuk webview dışında köprü yine de sayfaya tanımlı kalsın
+  }
 }
 
 function sendNavigate(href) {
@@ -33,6 +39,57 @@ try {
 } catch {
   window.desktopTeklif = api;
 }
+
+let metalixBridgeAt = 0;
+
+function deliverMetalix(input) {
+  const now = Date.now();
+  const payload = metalixBridgePayload(input, location.href);
+  const key = JSON.stringify(payload);
+  if (key === deliverMetalix.lastKey && now - metalixBridgeAt < 1200) return payload;
+  deliverMetalix.lastKey = key;
+  metalixBridgeAt = now;
+  sendAction('metalix-send', JSON.stringify(payload));
+  return payload;
+}
+
+const mrpDesktop = {
+  metalixOrd: (detail) => deliverMetalix(detail),
+};
+
+try {
+  contextBridge.exposeInMainWorld('mrpDesktop', mrpDesktop);
+} catch {
+  window.mrpDesktop = mrpDesktop;
+}
+
+const METALIX_PAGE_LISTENER = `
+(function () {
+  if (window.__mrpMetalixOrdListener) return;
+  window.__mrpMetalixOrdListener = true;
+  function onMetalix(event) {
+    if (!event || event.type !== 'mrp-metalix-ord') return;
+    if (typeof event.preventDefault === 'function') event.preventDefault();
+    var detail = event.detail;
+    if (window.mrpDesktop && typeof window.mrpDesktop.metalixOrd === 'function') {
+      window.mrpDesktop.metalixOrd(detail);
+    }
+  }
+  window.addEventListener('mrp-metalix-ord', onMetalix);
+  if (document && document.addEventListener) document.addEventListener('mrp-metalix-ord', onMetalix);
+})();
+`;
+
+function installMetalixPageListener() {
+  try {
+    webFrame.executeJavaScriptInIsolatedWorld(0, [{ code: METALIX_PAGE_LISTENER }]);
+  } catch {
+    // sayfa dünyası henüz hazır olmayabilir
+  }
+}
+
+installMetalixPageListener();
+document.addEventListener('DOMContentLoaded', installMetalixPageListener);
 
 function hrefLooksDesktop(href) {
   const h = String(href || '');
@@ -115,12 +172,11 @@ document.addEventListener(
     if (!el) return;
 
     if (isMetalixSendLabel(controlLabel(el))) {
-      event.preventDefault();
-      event.stopPropagation();
-      if (typeof event.stopImmediatePropagation === 'function') {
-        event.stopImmediatePropagation();
-      }
-      sendAction('metalix-send', JSON.stringify(metalixPayload(el)));
+      const scraped = metalixPayload(el);
+      setTimeout(() => {
+        if (Date.now() - metalixBridgeAt < 1200) return;
+        deliverMetalix(scraped);
+      }, 400);
       return;
     }
 

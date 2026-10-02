@@ -286,7 +286,23 @@ test('panel düğmesi ve API token yalnızca kendi hostuna yazılır', () => {
     '395'
   );
   assert.equal(ord.normalizeMetalixGroup('DKP_1.2', 'Tüm gruplar'), '');
+  assert.equal(ord.normalizeMetalixGroup('Tüm gruplar', ''), '');
   assert.equal(ord.normalizeMetalixGroup('DKP_1.2', 'DKP 1.2'), 'DKP_1.2');
+  const page = 'https://mrp.example/admin/manufacturing/view_manufacturing_order/395?tab=cut_files_tab';
+  const bridged = ord.metalixBridgePayload(
+    { mo_id: '395', dir: 'C:\\Metalix\\Perfex', group: 'Tüm gruplar' },
+    page
+  );
+  assert.equal(bridged.moId, '395');
+  assert.equal(bridged.dir, 'C:\\Metalix\\Perfex');
+  assert.equal(bridged.group, '');
+  const fromDetail = ord.metalixBridgePayload(
+    { detail: { manufacturing_order_id: 395, folder: 'C:/Metalix/Perfex', group_key: 'DKP_1.2' } },
+    page
+  );
+  assert.equal(fromDetail.group, 'DKP_1.2');
+  assert.equal(fromDetail.dir, 'C:/Metalix/Perfex');
+  assert.equal(ord.metalixBridgePayload({}, page).moId, '395');
   const hosts = ['mrp.example'];
   assert.equal(identity.isOwnApiUrl('https://mrp.example/firma/ps/api/v1/mrp/manufacturing_orders/395/ord', hosts), true);
   assert.equal(identity.isOwnApiUrl('https://evil.example/api/v1/mrp/manufacturing_orders/395/ord', hosts), false);

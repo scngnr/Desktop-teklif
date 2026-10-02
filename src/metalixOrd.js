@@ -428,11 +428,72 @@ function moIdFromPageUrl(url) {
 
 function normalizeMetalixGroup(value, label) {
   const text = String(label || '').replace(/\s+/g, ' ').trim();
-  if (/t[uü]m gruplar/i.test(text)) return '';
-  const v = String(value || '').trim();
-  if (!v || v === '*' || /^all$/i.test(v)) return '';
-  const checked = validateGroup(v);
+  const raw = String(value || '').replace(/\s+/g, ' ').trim();
+  if (/t[uü]m gruplar/i.test(text) || /t[uü]m gruplar/i.test(raw)) return '';
+  if (!raw || raw === '*' || /^all$/i.test(raw)) return '';
+  const checked = validateGroup(raw);
   return checked.ok ? checked.group : '';
+}
+
+function firstFilled(obj, keys) {
+  for (let i = 0; i < keys.length; i += 1) {
+    const value = obj[keys[i]];
+    if (value != null && String(value).trim()) return value;
+  }
+  return '';
+}
+
+/**
+ * Kesim sekmesi mrpDesktop.metalixOrd(detail) veya
+ * mrp-metalix-ord olayının detail gövdesi.
+ */
+function metalixBridgePayload(input, pageUrl) {
+  let raw = input;
+  if (typeof raw === 'string') {
+    const text = raw.trim();
+    if (text.startsWith('{') || text.startsWith('[')) {
+      try {
+        raw = JSON.parse(text);
+      } catch {
+        raw = {};
+      }
+    } else {
+      raw = {};
+    }
+  }
+  if (raw && typeof raw === 'object' && raw.detail && typeof raw.detail === 'object') {
+    raw = raw.detail;
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) raw = {};
+
+  let moId = '';
+  const moRaw = firstFilled(raw, [
+    'moId',
+    'mo_id',
+    'manufacturing_order_id',
+    'manufacturingOrderId',
+  ]);
+  if (moRaw) {
+    const checked = validateMoId(moRaw);
+    moId = checked.ok ? checked.moId : '';
+  }
+  if (!moId) moId = moIdFromPageUrl(pageUrl);
+
+  const dir = String(
+    firstFilled(raw, ['dir', 'folder', 'metalixDir', 'metalix_dir', 'path']) || ''
+  ).trim();
+  const group = normalizeMetalixGroup(
+    firstFilled(raw, ['group', 'group_key', 'groupKey']),
+    firstFilled(raw, ['group_label', 'groupLabel'])
+  );
+  const payload = { moId, dir, group };
+  const sheetX = firstFilled(raw, ['sheetX', 'sheet_x']);
+  const sheetY = firstFilled(raw, ['sheetY', 'sheet_y']);
+  const profile = firstFilled(raw, ['profile']);
+  if (sheetX) payload.sheetX = String(sheetX);
+  if (sheetY) payload.sheetY = String(sheetY);
+  if (profile) payload.profile = String(profile);
+  return payload;
 }
 
 function interpretGroups(status, body) {
@@ -717,4 +778,5 @@ module.exports = {
   isMetalixSendLabel,
   moIdFromPageUrl,
   normalizeMetalixGroup,
+  metalixBridgePayload,
 };
