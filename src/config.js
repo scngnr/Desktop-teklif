@@ -19,6 +19,10 @@ const DEFAULTS = {
   defaultRelId: 1,
   defaultProposalTo: 'Desktop Teklif',
   defaultEmail: 'no-reply@local.invalid',
+  /** Son seçilen Metalix klasörü — yalnızca bu bilgisayarda */
+  metalixDir: '',
+  metalixSheetX: '',
+  metalixSheetY: '',
 };
 
 let runtime = { ...DEFAULTS };
@@ -78,6 +82,9 @@ function load() {
     if (typeof raw.showDesktopFab === 'boolean') {
       runtime.showDesktopFab = raw.showDesktopFab;
     }
+    if (typeof raw.metalixDir === 'string') runtime.metalixDir = raw.metalixDir.trim();
+    if (typeof raw.metalixSheetX === 'string') runtime.metalixSheetX = raw.metalixSheetX.trim();
+    if (typeof raw.metalixSheetY === 'string') runtime.metalixSheetY = raw.metalixSheetY.trim();
   } catch {
     // varsayılanlarla devam
   }
@@ -101,6 +108,15 @@ function save(partial) {
   if (partial.showDesktopFab !== undefined) {
     runtime.showDesktopFab = !!partial.showDesktopFab;
   }
+  if (partial.metalixDir !== undefined) {
+    runtime.metalixDir = String(partial.metalixDir || '').trim();
+  }
+  if (partial.metalixSheetX !== undefined) {
+    runtime.metalixSheetX = String(partial.metalixSheetX || '').trim();
+  }
+  if (partial.metalixSheetY !== undefined) {
+    runtime.metalixSheetY = String(partial.metalixSheetY || '').trim();
+  }
 
   const file = settingsPath();
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -113,6 +129,9 @@ function save(partial) {
         authToken: runtime.authToken,
         apiBaseUrl: runtime.apiBaseUrl,
         showDesktopFab: !!runtime.showDesktopFab,
+        metalixDir: runtime.metalixDir || '',
+        metalixSheetX: runtime.metalixSheetX || '',
+        metalixSheetY: runtime.metalixSheetY || '',
       },
       null,
       2
@@ -141,6 +160,9 @@ function getPublic() {
     hasAuthToken: hasAuthToken(),
     apiBaseUrl: runtime.apiBaseUrl,
     showDesktopFab: !!runtime.showDesktopFab,
+    metalixDir: runtime.metalixDir || '',
+    metalixSheetX: runtime.metalixSheetX || '',
+    metalixSheetY: runtime.metalixSheetY || '',
     lastNumberPath: runtime.lastNumberPath,
     authHeaderName: runtime.authHeaderName,
     sampleFolderName: runtime.sampleFolderName,

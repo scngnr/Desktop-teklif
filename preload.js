@@ -26,6 +26,12 @@ contextBridge.exposeInMainWorld('teklifApp', {
   parseDesktopAction: (url) => ipcRenderer.sendSync('desktop:parseAction', url),
   apiRequest: (method, path, body) =>
     ipcRenderer.invoke('api:request', { method, path, body }),
+  metalixGroups: (moId) => ipcRenderer.invoke('metalix:groups', moId),
+  metalixDownload: (payload) => ipcRenderer.invoke('metalix:download', payload || {}),
+  metalixPickDir: () => ipcRenderer.invoke('metalix:pickDir'),
+  metalixSubmitNest: (payload) => ipcRenderer.invoke('metalix:submitNest', payload || {}),
+  metalixReports: (moId) => ipcRenderer.invoke('metalix:reports', moId),
+  metalixOpen: (payload) => ipcRenderer.invoke('metalix:open', payload || {}),
   webviewPreloadPath: () => ipcRenderer.sendSync('app:webviewPreload'),
   buildPerfexMenuInject: (payload) =>
     ipcRenderer.sendSync('desktop:perfexInject', payload),

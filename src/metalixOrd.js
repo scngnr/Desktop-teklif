@@ -1,0 +1,581 @@
+const fs = require('fs');
+const path = require('path');
+const zlib = require('zlib');
+
+const DIR_MAX = 200;
+const CSV_MAX_BYTES = 8 * 1024 * 1024;
+const NEST_PROFILE = 'metalix_perfex';
+
+const MESSAGES = {
+  dir_required: 'Klasör gerekli.',
+  dir_too_long: 'Klasör 200 karakteri aşıyor.',
+  dir_invalid: 'Klasör tırnak veya kontrol karakteri içeremez.',
+  group_invalid: 'Grup anahtarında bölü veya tırnak var.',
+  no_parts: 'Adedi girilmiş parça yok.',
+  dxf_missing: 'Parça var ama DXF okunamadı.',
+  mo_not_found: 'Üretim emri yok.',
+  csv_required: 'Gövde CSV değil.',
+  csv_empty: 'CSV boş.',
+  csv_only: 'Dosya adı .csv veya .txt olmalı.',
+  csv_too_large: 'CSV 8 MB sınırını aşıyor.',
+  profile_required: 'Profil id veya kod gerekli.',
+  parse_failed: 'Şablon tanınmadı veya sac satırı yok.',
+  nest_not_ready: 'Yerleşim tabloları yok.',
+  mo_invalid: 'Üretim emri numarası geçersiz.',
+  zip_slip: 'Zip klasörün dışına yazmaya çalıştı.',
+  zip_invalid: 'Zip dosyası okunamadı.',
+  zip_unsupported: 'Bu zip sıkıştırması açılmıyor.',
+  sheet_size_required: 'AutoNest LoadOrdFile için sac ölçüsü (X ve Y, mm) gerekli.',
+  ord_missing: 'ORD dosyası bulunamadı.',
+  ord_invalid: 'Yalnızca .ord dosyası açılır.',
+};
+
+function explainMetalixCode(code) {
+  if (!code) return '';
+  return MESSAGES[String(code)] || '';
+}
+
+function fail(code, extra) {
+  return {
+    ok: false,
+    code,
+    error: explainMetalixCode(code) || code,
+    ...(extra || {}),
+  };
+}
+
+function validateMoId(moId) {
+  const s = String(moId == null ? '' : moId).trim();
+  if (!/^[1-9]\d*$/.test(s)) return fail('mo_invalid');
+  const n = Number(s);
+  if (!Number.isSafeInteger(n) || n <= 0) return fail('mo_invalid');
+  return { ok: true, moId: String(n) };
+}
+
+function hasControlChar(value) {
+  return /[\u0000-\u001f\u007f]/.test(String(value));
+}
+
+function validateDir(dir) {
+  const s = String(dir == null ? '' : dir).trim();
+  if (!s) return fail('dir_required');
+  if (s.length > DIR_MAX) return fail('dir_too_long');
+  if (/["']/.test(s) || hasControlChar(s)) return fail('dir_invalid');
+  return { ok: true, dir: s };
+}
+
+function validateGroup(group) {
+  const s = String(group == null ? '' : group).trim();
+  if (!s) return { ok: true, group: '' };
+  if (/[/\\"']/.test(s) || hasControlChar(s)) return fail('group_invalid');
+  return { ok: true, group: s };
+}
+
+function metalixNumber(value) {
+  if (value == null || value === '') return '';
+  const n = Number(value);
+  if (!Number.isFinite(n)) return String(value);
+  if (Object.is(n, -0)) return '0';
+  if (Number.isInteger(n)) return String(n);
+  return String(n);
+}
+
+/**
+ * cncKad AutoNest "Add list to ORD" satırı.
+ * "sipariş"   "tam dxf yolu"   min   max   @M=malzemeNo   @T=kalınlık
+ */
+function formatOrdLine(part) {
+  const orderName = String(part.orderName == null ? '' : part.orderName);
+  const filePath = String(part.filePath == null ? '' : part.filePath);
+  const minQty = metalixNumber(part.minQty);
+  const maxQty = metalixNumber(part.maxQty);
+  const material = metalixNumber(part.material);
+  const thickness = metalixNumber(part.thickness);
+  return (
+    '"' +
+    orderName +
+    '"   "' +
+    filePath +
+    '"   ' +
+    minQty +
+    '   ' +
+    maxQty +
+    '   @M=' +
+    material +
+    '   @T=' +
+    thickness
+  );
+}
+
+function parseOrdLine(line) {
+  const raw = String(line || '').trim();
+  if (!raw || raw.startsWith('#')) return null;
+  const quoted = [];
+  const re = /"([^"]*)"/g;
+  let match;
+  while ((match = re.exec(raw))) quoted.push(match[1]);
+  if (!quoted.length && !/@[MT]=/i.test(raw)) return null;
+  const rest = raw.replace(/"[^"]*"/g, ' ').replace(/@[MT]=[^\s]+/gi, ' ');
+  const nums = rest.match(/\d+(?:\.\d+)?/g) || [];
+  const material = raw.match(/@M=([^\s]+)/i);
+  const thickness = raw.match(/@T=([^\s]+)/i);
+  return {
+    orderName: quoted[0] || '',
+    filePath: quoted[1] || '',
+    minQty: nums[0] || '',
+    maxQty: nums[1] || '',
+    material: material ? material[1] : '',
+    thickness: thickness ? thickness[1] : '',
+  };
+}
+
+function normalizeWinPath(value) {
+  return String(value || '')
+    .replace(/\//g, '\\')
+    .replace(/\\+$/, '')
+    .toLowerCase();
+}
+
+function pathIsUnderDir(filePath, dir) {
+  const file = normalizeWinPath(filePath);
+  const root = normalizeWinPath(dir);
+  if (!file || !root) return false;
+  return file === root || file.startsWith(root + '\\');
+}
+
+function partIdFromDxf(filePath) {
+  const base = path.win32.basename(String(filePath || '').replace(/\//g, '\\'));
+  const match = base.match(/^P(\d+)-/i);
+  return match ? match[1] : '';
+}
+
+function decodeOrdText(buffer) {
+  const buf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer || '');
+  if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) {
+    return buf.subarray(3).toString('utf8');
+  }
+  const utf8 = buf.toString('utf8');
+  if (!utf8.includes('\uFFFD')) return utf8;
+  try {
+    return new TextDecoder('windows-1254').decode(buf);
+  } catch {
+    return utf8;
+  }
+}
+
+function inspectOrdText(text, dir) {
+  const parsed = String(text || '')
+    .split(/\r?\n/)
+    .map(parseOrdLine)
+    .filter(Boolean);
+  const warnings = [];
+  parsed.forEach((line) => {
+    if (!line.filePath) {
+      warnings.push({ code: 'ord_path_missing', orderName: line.orderName });
+      return;
+    }
+    if (dir && !pathIsUnderDir(line.filePath, dir)) {
+      warnings.push({ code: 'ord_dir_mismatch', filePath: line.filePath });
+    }
+    if (!partIdFromDxf(line.filePath)) {
+      warnings.push({ code: 'part_id_missing', filePath: line.filePath });
+    }
+  });
+  return { lineCount: parsed.length, lines: parsed, warnings };
+}
+
+function nestFilename(name) {
+  let base = path.basename(String(name || '').trim());
+  if (!base || base === '.' || base === '..') base = 'rapor.csv';
+  if (!path.extname(base)) base += '.csv';
+  const ext = path.extname(base).toLowerCase();
+  if (ext !== '.csv' && ext !== '.txt') return fail('csv_only');
+  return { ok: true, filename: base };
+}
+
+function prepareNestCsv(filename, csv) {
+  const named = nestFilename(filename);
+  if (!named.ok) return named;
+  const text = csv == null ? '' : String(csv);
+  if (!text.trim()) return fail('csv_empty');
+  const bytes = Buffer.byteLength(text, 'utf8');
+  if (bytes > CSV_MAX_BYTES) return fail('csv_too_large');
+  return { ok: true, filename: named.filename, csv: text, bytes };
+}
+
+function nestProfile(profile) {
+  const s = String(profile == null ? '' : profile).trim();
+  return s || NEST_PROFILE;
+}
+
+function nestJsonBody(payload) {
+  const prepared = prepareNestCsv(payload && payload.filename, payload && payload.csv);
+  if (!prepared.ok) return prepared;
+  return {
+    ok: true,
+    body: {
+      filename: prepared.filename,
+      profile: nestProfile(payload && payload.profile),
+      csv: prepared.csv,
+    },
+  };
+}
+
+function ordEndpointPaths(moId) {
+  const id = validateMoId(moId);
+  if (!id.ok) return id;
+  const tail = 'mrp/manufacturing_orders/' + id.moId + '/ord';
+  return { ok: true, moId: id.moId, paths: ['api/v1/' + tail, 'api/' + tail] };
+}
+
+function nestEndpointPaths(moId) {
+  const id = validateMoId(moId);
+  if (!id.ok) return id;
+  const tail = 'mrp/manufacturing_orders/' + id.moId + '/nest';
+  return { ok: true, moId: id.moId, paths: ['api/v1/' + tail, 'api/' + tail] };
+}
+
+function joinApiUrl(apiRoot, relPath) {
+  const root = String(apiRoot || '').replace(/\/+$/, '');
+  const rel = String(relPath || '').replace(/^\/+/, '');
+  return root + '/' + rel;
+}
+
+function isZipPayload(headers, body) {
+  const ct = String((headers && (headers['content-type'] || headers['Content-Type'])) || '');
+  if (/zip/i.test(ct)) return true;
+  return Buffer.isBuffer(body) && body.length >= 4 && body.readUInt32LE(0) === 0x04034b50;
+}
+
+function filenameFromDisposition(header) {
+  const h = String(header || '');
+  const star = h.match(/filename\*=(?:UTF-8'')?([^;]+)/i);
+  if (star) {
+    const raw = star[1].trim().replace(/^"|"$/g, '');
+    try {
+      return decodeURIComponent(raw);
+    } catch {
+      return raw;
+    }
+  }
+  const quoted = h.match(/filename="([^"]+)"/i);
+  if (quoted) return quoted[1];
+  const plain = h.match(/filename=([^;]+)/i);
+  return plain ? plain[1].trim().replace(/^"|"$/g, '') : '';
+}
+
+function headerValue(headers, name) {
+  if (!headers) return '';
+  const want = name.toLowerCase();
+  if (headers[want] != null) return String(headers[want]);
+  const key = Object.keys(headers).find((k) => k.toLowerCase() === want);
+  return key ? String(headers[key]) : '';
+}
+
+function decodeHeaderParam(value) {
+  const raw = String(value || '');
+  if (!raw) return '';
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
+function parseJsonBuffer(body) {
+  const text = Buffer.isBuffer(body) ? body.toString('utf8') : String(body || '');
+  if (!text.trim()) return { text, json: null };
+  try {
+    return { text, json: JSON.parse(text) };
+  } catch {
+    return { text, json: null };
+  }
+}
+
+function errorFromApi(status, json, text) {
+  const code = json && (json.code || (typeof json.error === 'string' ? json.error : ''));
+  const message = explainMetalixCode(code) || (json && json.message) || String(text || '').slice(0, 400);
+  return {
+    ok: false,
+    status: status || 0,
+    code: code || '',
+    error: message || 'İstek başarısız.',
+    json: json || null,
+  };
+}
+
+function interpretGroups(status, body) {
+  const parsed = parseJsonBuffer(body);
+  if (status && status >= 400) return errorFromApi(status, parsed.json, parsed.text);
+  const json = parsed.json;
+  if (!json || json.status === false) {
+    return errorFromApi(status || 0, json, parsed.text);
+  }
+  const groups = Array.isArray(json.groups) ? json.groups : [];
+  return {
+    ok: true,
+    status: status || 200,
+    moId: json.mo_id,
+    manufacturingOrderCode: json.manufacturing_order_code || '',
+    suggestedDir: json.suggested_dir || '',
+    groups,
+    json,
+  };
+}
+
+function interpretOrdDownload(status, headers, body) {
+  const buf = Buffer.isBuffer(body) ? body : Buffer.from(body || '');
+  if (isZipPayload(headers, buf) && status < 400) {
+    return {
+      ok: true,
+      status,
+      filename: filenameFromDisposition(headerValue(headers, 'content-disposition')),
+      ordFiles: Number(headerValue(headers, 'x-mrp-ord-files')) || 0,
+      missing: Number(headerValue(headers, 'x-mrp-ord-missing')) || 0,
+      ordDir: decodeHeaderParam(headerValue(headers, 'x-mrp-ord-dir')),
+      zip: buf,
+    };
+  }
+  const parsed = parseJsonBuffer(buf);
+  return errorFromApi(status, parsed.json, parsed.text);
+}
+
+function reportListFromJson(json) {
+  if (!json) return [];
+  if (Array.isArray(json)) return json;
+  if (Array.isArray(json.reports)) return json.reports;
+  if (Array.isArray(json.data)) return json.data;
+  if (json.report && typeof json.report === 'object') return [json.report];
+  return [];
+}
+
+function interpretNestPost(status, body) {
+  const parsed = parseJsonBuffer(body);
+  if (!parsed.json || status >= 400 || parsed.json.status === false) {
+    return errorFromApi(status, parsed.json, parsed.text);
+  }
+  const json = parsed.json;
+  return {
+    ok: true,
+    status,
+    moId: json.mo_id,
+    reportId: json.report_id || (json.report && json.report.id) || null,
+    message: json.message || '',
+    report: json.report || null,
+    supply: json.supply || null,
+    json,
+  };
+}
+
+function interpretNestList(status, body) {
+  const parsed = parseJsonBuffer(body);
+  if (status >= 400 || (parsed.json && parsed.json.status === false)) {
+    return errorFromApi(status, parsed.json, parsed.text);
+  }
+  return {
+    ok: true,
+    status,
+    reports: reportListFromJson(parsed.json),
+    json: parsed.json,
+  };
+}
+
+function sheetSizeEnv(input) {
+  const sx = Number(input && input.sheetX);
+  const sy = Number(input && input.sheetY);
+  if (!Number.isFinite(sx) || !Number.isFinite(sy) || sx <= 0 || sy <= 0) {
+    return fail('sheet_size_required');
+  }
+  return {
+    ok: true,
+    env: {
+      METALIX_ORD: String(input.ordPath || ''),
+      METALIX_SX: String(sx),
+      METALIX_SY: String(sy),
+      METALIX_START: input.startNest ? '1' : '0',
+    },
+  };
+}
+
+const METALIX_PS = [
+  "$ErrorActionPreference = 'Stop'",
+  '$doc = New-Object -ComObject OptiMech.Document',
+  '$doc.ShowWin() | Out-Null',
+  '$doc.LoadOrdFile($env:METALIX_ORD, [double]$env:METALIX_SX, [double]$env:METALIX_SY) | Out-Null',
+  "if ($env:METALIX_START -eq '1') {",
+  '  $nest = $doc.DoStartAutoNest()',
+  "  Write-Output ('NEST ' + $nest)",
+  '} else {',
+  "  Write-Output 'LOADED'",
+  '}',
+].join('\n');
+
+function findEocd(buf) {
+  const min = Math.max(0, buf.length - 22 - 65535);
+  for (let i = buf.length - 22; i >= min; i -= 1) {
+    if (buf.readUInt32LE(i) === 0x06054b50) return i;
+  }
+  const err = new Error('zip_invalid');
+  err.code = 'zip_invalid';
+  throw err;
+}
+
+function readZipEntries(buf) {
+  if (!Buffer.isBuffer(buf) || buf.length < 22) {
+    const err = new Error('zip_invalid');
+    err.code = 'zip_invalid';
+    throw err;
+  }
+  const eocd = findEocd(buf);
+  const total = buf.readUInt16LE(eocd + 10);
+  const cdSize = buf.readUInt32LE(eocd + 12);
+  const cdOffset = buf.readUInt32LE(eocd + 16);
+  if (cdOffset === 0xffffffff || cdSize === 0xffffffff) {
+    const err = new Error('zip_unsupported');
+    err.code = 'zip_unsupported';
+    throw err;
+  }
+  const entries = [];
+  let cursor = cdOffset;
+  const cdEnd = cdOffset + cdSize;
+  for (let n = 0; n < total; n += 1) {
+    if (cursor + 46 > buf.length || buf.readUInt32LE(cursor) !== 0x02014b50) {
+      const err = new Error('zip_invalid');
+      err.code = 'zip_invalid';
+      throw err;
+    }
+    const flags = buf.readUInt16LE(cursor + 8);
+    const method = buf.readUInt16LE(cursor + 10);
+    const compSize = buf.readUInt32LE(cursor + 20);
+    const nameLen = buf.readUInt16LE(cursor + 28);
+    const extraLen = buf.readUInt16LE(cursor + 30);
+    const commentLen = buf.readUInt16LE(cursor + 32);
+    const localOffset = buf.readUInt32LE(cursor + 42);
+    const name = buf.subarray(cursor + 46, cursor + 46 + nameLen).toString('utf8');
+    if (flags & 0x1) {
+      const err = new Error('zip_unsupported');
+      err.code = 'zip_unsupported';
+      throw err;
+    }
+    if (localOffset === 0xffffffff || compSize === 0xffffffff) {
+      const err = new Error('zip_unsupported');
+      err.code = 'zip_unsupported';
+      throw err;
+    }
+    entries.push({ name, method, compSize, localOffset });
+    cursor += 46 + nameLen + extraLen + commentLen;
+    if (cursor > cdEnd + 1) break;
+  }
+  return entries;
+}
+
+function safeZipTarget(root, name) {
+  const normalized = String(name || '').replace(/\\/g, '/');
+  if (!normalized || normalized.startsWith('/') || /^[a-zA-Z]:/.test(normalized)) {
+    const err = new Error('zip_slip');
+    err.code = 'zip_slip';
+    throw err;
+  }
+  const parts = normalized.split('/').filter((part) => part && part !== '.');
+  if (!parts.length || parts.some((part) => part === '..')) {
+    const err = new Error('zip_slip');
+    err.code = 'zip_slip';
+    throw err;
+  }
+  const target = path.resolve(root, ...parts);
+  const prefix = root.endsWith(path.sep) ? root : root + path.sep;
+  if (target !== root && !target.startsWith(prefix)) {
+    const err = new Error('zip_slip');
+    err.code = 'zip_slip';
+    throw err;
+  }
+  return { target, directory: normalized.endsWith('/') };
+}
+
+function entryBytes(buf, entry) {
+  const local = entry.localOffset;
+  if (local + 30 > buf.length || buf.readUInt32LE(local) !== 0x04034b50) {
+    const err = new Error('zip_invalid');
+    err.code = 'zip_invalid';
+    throw err;
+  }
+  const nameLen = buf.readUInt16LE(local + 26);
+  const extraLen = buf.readUInt16LE(local + 28);
+  const start = local + 30 + nameLen + extraLen;
+  const end = start + entry.compSize;
+  if (end > buf.length) {
+    const err = new Error('zip_invalid');
+    err.code = 'zip_invalid';
+    throw err;
+  }
+  const compressed = buf.subarray(start, end);
+  if (entry.method === 0) return compressed;
+  if (entry.method === 8) return zlib.inflateRawSync(compressed);
+  const err = new Error('zip_unsupported');
+  err.code = 'zip_unsupported';
+  throw err;
+}
+
+function extractZip(buffer, destDir) {
+  const buf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
+  const root = path.resolve(destDir);
+  const entries = readZipEntries(buf);
+  const planned = entries.map((entry) => ({
+    entry,
+    located: safeZipTarget(root, entry.name),
+    bytes: entry.name.endsWith('/') ? null : entryBytes(buf, entry),
+  }));
+  fs.mkdirSync(root, { recursive: true });
+  const files = [];
+  planned.forEach((item) => {
+    if (item.located.directory) {
+      fs.mkdirSync(item.located.target, { recursive: true });
+      return;
+    }
+    fs.mkdirSync(path.dirname(item.located.target), { recursive: true });
+    fs.writeFileSync(item.located.target, item.bytes);
+    files.push(item.located.target);
+  });
+  return files;
+}
+
+function localDest(dir) {
+  if (path.win32.isAbsolute(dir) || path.posix.isAbsolute(dir)) return dir;
+  return path.resolve(dir);
+}
+
+module.exports = {
+  DIR_MAX,
+  CSV_MAX_BYTES,
+  NEST_PROFILE,
+  METALIX_PS,
+  MESSAGES,
+  explainMetalixCode,
+  validateMoId,
+  validateDir,
+  validateGroup,
+  metalixNumber,
+  formatOrdLine,
+  parseOrdLine,
+  pathIsUnderDir,
+  partIdFromDxf,
+  decodeOrdText,
+  inspectOrdText,
+  nestFilename,
+  prepareNestCsv,
+  nestProfile,
+  nestJsonBody,
+  ordEndpointPaths,
+  nestEndpointPaths,
+  joinApiUrl,
+  isZipPayload,
+  filenameFromDisposition,
+  interpretGroups,
+  interpretOrdDownload,
+  interpretNestPost,
+  interpretNestList,
+  sheetSizeEnv,
+  extractZip,
+  localDest,
+  readZipEntries,
+};

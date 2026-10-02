@@ -1412,6 +1412,88 @@ button:disabled {
   text-align: left;
 }
 
+.ops-metalix {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 12px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.ops-metalix h3 {
+  font-size: 0.95rem;
+  margin-bottom: 4px;
+}
+
+.ops-metalix-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.ops-metalix-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.ops-metalix-grid input,
+.ops-metalix-grid select {
+  font: inherit;
+  color: inherit;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+
+.ops-metalix-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.ops-metalix-actions button,
+.ops-metalix-ords button {
+  font: inherit;
+  font-size: 0.78rem;
+  color: inherit;
+  background: rgba(31, 111, 235, 0.16);
+  border: 1px solid rgba(31, 111, 235, 0.4);
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.ops-metalix-actions button:disabled,
+.ops-metalix-ords button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.ops-metalix-ords {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.ops-metalix-ords li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.ops-metalix-ords span {
+  word-break: break-all;
+}
+
 @media (max-width: 1100px) {
   .ops-ws-metrics {
     grid-template-columns: repeat(3, minmax(0, 1fr));

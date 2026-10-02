@@ -3,6 +3,7 @@ const {
   BrowserWindow,
   ipcMain,
   shell,
+  dialog,
   Menu,
   session,
   screen,
@@ -29,6 +30,7 @@ const remoteModule = require('./src/remoteModuleService');
 const desktopIdentity = require('./src/desktopIdentity');
 const floatingWindow = require('./src/floatingWindow');
 const perfexMenuInject = require('./src/perfexMenuInject');
+const metalix = require('./src/metalixApi');
 
 if (process.platform === 'linux') {
   floatingWindow.enableLinuxTransparency(app);
@@ -525,6 +527,118 @@ ipcMain.handle('api:request', async (_event, payload = {}) => {
     };
   } catch (err) {
     return { ok: false, status: 0, error: err.message || String(err) };
+  }
+});
+
+function metalixAuth() {
+  if (!config.hasAuthToken()) {
+    return {
+      ok: false,
+      needSettings: true,
+      error: 'JWT token yok. Ayarlar’dan token girin.',
+    };
+  }
+  return null;
+}
+
+function rememberMetalixPrefs(partial) {
+  const next = {};
+  if (partial.metalixDir !== undefined) next.metalixDir = partial.metalixDir;
+  if (partial.metalixSheetX !== undefined) next.metalixSheetX = partial.metalixSheetX;
+  if (partial.metalixSheetY !== undefined) next.metalixSheetY = partial.metalixSheetY;
+  if (Object.keys(next).length) config.save(next);
+}
+
+ipcMain.handle('metalix:groups', async (_event, moId) => {
+  const missing = metalixAuth();
+  if (missing) return missing;
+  try {
+    return await metalix.fetchGroups(moId);
+  } catch (err) {
+    return { ok: false, error: err.message || String(err) };
+  }
+});
+
+ipcMain.handle('metalix:pickDir', async () => {
+  const current = config.get().metalixDir;
+  const picked = await dialog.showOpenDialog(mainWindow || undefined, {
+    title: 'Metalix klasörü',
+    defaultPath: current || undefined,
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  if (picked.canceled || !picked.filePaths || !picked.filePaths[0]) {
+    return { ok: false, canceled: true };
+  }
+  const dir = picked.filePaths[0];
+  rememberMetalixPrefs({ metalixDir: dir });
+  return { ok: true, dir };
+});
+
+ipcMain.handle('metalix:download', async (_event, payload = {}) => {
+  const missing = metalixAuth();
+  if (missing) return missing;
+  try {
+    const result = await metalix.downloadOrd(payload);
+    if (result.ok) {
+      rememberMetalixPrefs({
+        metalixDir: result.dir,
+        metalixSheetX: String(payload.sheetX || ''),
+        metalixSheetY: String(payload.sheetY || ''),
+      });
+    }
+    return result;
+  } catch (err) {
+    return { ok: false, error: err.message || String(err) };
+  }
+});
+
+ipcMain.handle('metalix:open', async (_event, payload = {}) => {
+  try {
+    const result = await metalix.openOrd(payload);
+    if (payload.sheetX || payload.sheetY) {
+      rememberMetalixPrefs({
+        metalixSheetX: String(payload.sheetX || ''),
+        metalixSheetY: String(payload.sheetY || ''),
+      });
+    }
+    return result;
+  } catch (err) {
+    return { ok: false, error: err.message || String(err) };
+  }
+});
+
+ipcMain.handle('metalix:submitNest', async (_event, payload = {}) => {
+  const missing = metalixAuth();
+  if (missing) return missing;
+  try {
+    const picked = await dialog.showOpenDialog(mainWindow || undefined, {
+      title: 'Metalix Perfex CSV',
+      properties: ['openFile'],
+      filters: [{ name: 'CSV', extensions: ['csv', 'txt'] }],
+    });
+    if (picked.canceled || !picked.filePaths || !picked.filePaths[0]) {
+      return { ok: false, canceled: true };
+    }
+    const file = metalix.readNestFile(picked.filePaths[0]);
+    if (!file.ok) return file;
+    return await metalix.submitNest({
+      moId: payload.moId,
+      profile: payload.profile,
+      filename: file.filename,
+      csv: file.csv,
+    });
+  } catch (err) {
+    return { ok: false, error: err.message || String(err) };
+  }
+});
+
+ipcMain.handle('metalix:reports', async (_event, moId) => {
+  const missing = metalixAuth();
+  if (missing) return missing;
+  try {
+    return await metalix.listReports(moId);
+  } catch (err) {
+    return { ok: false, error: err.message || String(err) };
   }
 });
 

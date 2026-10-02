@@ -36,6 +36,11 @@
   let listSource = 'teklif';
   let cachedBaseUrl = '';
   let cachedAuthToken = '';
+  let metalixDirCache = '';
+  let metalixSheetXCache = '';
+  let metalixSheetYCache = '';
+  let metalixBusy = false;
+  let metalixOrdFiles = [];
   let lastListItems = [];
 
   function el(id) {
@@ -99,6 +104,9 @@
       const cfg = await window.teklifApp.getConfig();
       cachedBaseUrl = String((cfg && (cfg.apiRoot || cfg.baseUrl)) || '').replace(/\/+$/, '');
       cachedAuthToken = String((cfg && cfg.authToken) || '');
+      metalixDirCache = String((cfg && cfg.metalixDir) || '');
+      metalixSheetXCache = String((cfg && cfg.metalixSheetX) || '');
+      metalixSheetYCache = String((cfg && cfg.metalixSheetY) || '');
     } catch {
       cachedBaseUrl = '';
     }
@@ -1441,6 +1449,385 @@
     return has ? fields : null;
   }
 
+  function manufacturingOrderId(row) {
+    if (!row || typeof row !== 'object') return '';
+    const keys = ['mo_id', 'manufacturing_order_id', 'manufacturing_id'];
+    for (let i = 0; i < keys.length; i += 1) {
+      const n = Number(row[keys[i]]);
+      if (Number.isInteger(n) && n > 0) return String(n);
+    }
+    const code = String(row.manufacturing_order_code || row.mo_code || row.code || '');
+    const tagged = code.match(/\bMO-(\d+)\b/i);
+    if (tagged) return tagged[1];
+    if (row.manufacturing_order_code && Number.isInteger(Number(row.id)) && Number(row.id) > 0) {
+      return String(Number(row.id));
+    }
+    return '';
+  }
+
+  function moCandidates(list) {
+    const seen = new Set();
+    const out = [];
+    (list || []).forEach((row) => {
+      const id = manufacturingOrderId(row);
+      if (!id || seen.has(id)) return;
+      seen.add(id);
+      out.push({
+        id: id,
+        label:
+          displayText(row.manufacturing_order_code) ||
+          displayText(row.mo_code) ||
+          displayText(row.code) ||
+          'MO-' + id,
+      });
+    });
+    return out;
+  }
+
+  function metalixDockHtml(list) {
+    const candidates = moCandidates(list);
+    const preset = candidates.length ? candidates[0].id : '';
+    const options = ['<option value="">Üretim emri seç</option>']
+      .concat(
+        candidates.map((item) => {
+          return (
+            '<option value="' +
+            escapeHtml(item.id) +
+            '"' +
+            (item.id === preset ? ' selected' : '') +
+            '>' +
+            escapeHtml(item.label) +
+            '</option>'
+          );
+        })
+      )
+      .join('');
+    return (
+      '<section class="ops-metalix" id="opsMetalix">' +
+      '<h3>Metalix kesim</h3>' +
+      '<p class="ops-cost-note">ORD zip seçtiğiniz klasöre açılır. Sunucu o klasöre dosya yazmaz. Metalix Perfex CSV’si kesim süresi, sac adedi ve sac kilogramını üretim emrine yazar.</p>' +
+      '<div class="ops-metalix-grid">' +
+      '<label>Üretim emri<input id="metalixMo" inputmode="numeric" value="' +
+      escapeHtml(preset) +
+      '" placeholder="395" /></label>' +
+      '<label>Listeden<select id="metalixMoPick">' +
+      options +
+      '</select></label>' +
+      '<label>Klasör<input id="metalixDir" value="' +
+      escapeHtml(metalixDirCache) +
+      '" placeholder="D:\\Metalix\\Gelen" /></label>' +
+      '<label>Grup<select id="metalixGroup"><option value="">Tüm gruplar</option></select></label>' +
+      '<label>Profil<input id="metalixProfile" value="metalix_perfex" /></label>' +
+      '<label>Sac X mm<input id="metalixSx" inputmode="decimal" value="' +
+      escapeHtml(metalixSheetXCache) +
+      '" placeholder="2000" /></label>' +
+      '<label>Sac Y mm<input id="metalixSy" inputmode="decimal" value="' +
+      escapeHtml(metalixSheetYCache) +
+      '" placeholder="1250" /></label>' +
+      '</div>' +
+      '<p class="ops-cost-note" id="metalixHint"></p>' +
+      '<div class="ops-metalix-actions">' +
+      '<button type="button" data-metalix="groups">Grupları getir</button>' +
+      '<button type="button" data-metalix="dir">Klasör seç</button>' +
+      '<button type="button" data-metalix="ord">ORD indir</button>' +
+      '<button type="button" data-metalix="nest">CSV gönder</button>' +
+      '<button type="button" data-metalix="reports">Kayıtlı raporlar</button>' +
+      '<button type="button" data-metalix="cut">Kesim sekmesi</button>' +
+      '</div>' +
+      '<div id="metalixOut" class="ops-metalix-out"></div>' +
+      '</section>'
+    );
+  }
+
+  function metalixValues() {
+    return {
+      moId: (el('metalixMo') && el('metalixMo').value.trim()) || '',
+      dir: (el('metalixDir') && el('metalixDir').value.trim()) || '',
+      group: (el('metalixGroup') && el('metalixGroup').value) || '',
+      profile: (el('metalixProfile') && el('metalixProfile').value.trim()) || 'metalix_perfex',
+      sheetX: (el('metalixSx') && el('metalixSx').value.trim()) || '',
+      sheetY: (el('metalixSy') && el('metalixSy').value.trim()) || '',
+    };
+  }
+
+  function setMetalixBusy(on) {
+    metalixBusy = on;
+    const root = el('opsMetalix');
+    if (!root) return;
+    root.querySelectorAll('[data-metalix]').forEach((btn) => {
+      btn.disabled = on;
+    });
+  }
+
+  function metalixWrite(html) {
+    const host = el('metalixOut');
+    if (host) host.innerHTML = html;
+  }
+
+  function metalixNote(text, kind) {
+    metalixWrite(
+      '<p class="ops-banner' +
+        (kind === 'warn' ? ' ops-banner-warn' : '') +
+        '">' +
+        escapeHtml(text) +
+        '</p>'
+    );
+  }
+
+  function reportBlock(report, supply, message) {
+    if (!report) return message ? '<p>' + escapeHtml(message) + '</p>' : '';
+    const groups = Array.isArray(report.groups) ? report.groups : [];
+    const rows = groups
+      .map((group) => {
+        const material = [group.material, group.thickness]
+          .filter((part) => part != null && part !== '')
+          .join(' ');
+        return (
+          '<tr><td>' +
+          escapeHtml(material) +
+          '</td><td>' +
+          escapeHtml(group.size || '—') +
+          '</td><td>' +
+          escapeHtml(group.sheets == null ? '—' : String(group.sheets)) +
+          '</td><td>' +
+          escapeHtml(group.cut_minutes == null ? '—' : String(group.cut_minutes)) +
+          '</td><td>' +
+          escapeHtml(group.pierces == null ? '—' : String(group.pierces)) +
+          '</td></tr>'
+        );
+      })
+      .join('');
+    let supplyText = '';
+    if (supply && supply.ok) supplyText = 'Sac ve boya satırları malzeme listesine yazıldı.';
+    else if (supply && supply.ok === false) supplyText = 'Rapor duruyor; malzeme listesi güncellenmedi.';
+    return (
+      '<div class="ops-metalix-report">' +
+      (message ? '<p>' + escapeHtml(message) + '</p>' : '') +
+      '<p><strong>' +
+      escapeHtml(report.cut_minutes == null ? '—' : String(report.cut_minutes)) +
+      ' dk</strong> kesim · sac ' +
+      escapeHtml(report.sheet_kg_calc == null ? '—' : String(report.sheet_kg_calc)) +
+      ' kg · delme ' +
+      escapeHtml(report.pierces == null ? '—' : String(report.pierces)) +
+      (report.sheets_total != null ? ' · ' + escapeHtml(String(report.sheets_total)) + ' sac' : '') +
+      (report.machine ? ' · ' + escapeHtml(report.machine) : '') +
+      '</p>' +
+      (supplyText
+        ? '<p class="ops-cost-note">' +
+          escapeHtml(supplyText + (supply.message ? ' ' + supply.message : '')) +
+          '</p>'
+        : '') +
+      (rows
+        ? '<table class="ops-mini"><thead><tr><th>Malzeme</th><th>Ölçü</th><th>Sac</th><th>Kesim dk</th><th>Delme</th></tr></thead><tbody>' +
+          rows +
+          '</tbody></table>'
+        : '') +
+      '</div>'
+    );
+  }
+
+  function ordResultHtml(result) {
+    metalixOrdFiles = result.ords || [];
+    const items = metalixOrdFiles
+      .map((file, index) => {
+        const warns = (file.warnings || []).length;
+        return (
+          '<li><span>' +
+          escapeHtml(file.path) +
+          '</span> <button type="button" data-metalix="open" data-ord-index="' +
+          index +
+          '">Metalix’te aç</button> <button type="button" data-metalix="start" data-ord-index="' +
+          index +
+          '">Yerleşimi başlat</button>' +
+          (warns ? ' <em>' + escapeHtml(String(warns)) + ' uyarı</em>' : '') +
+          '</li>'
+        );
+      })
+      .join('');
+    const missing =
+      result.missing > 0 ? ' DXF’i bulunamadığı için atlanan parça: ' + result.missing + '.' : '';
+    return (
+      '<p>Zip açıldı' +
+      (result.filename ? ': ' + escapeHtml(result.filename) : '') +
+      '. ORD: ' +
+      escapeHtml(String(result.ordFiles || metalixOrdFiles.length)) +
+      '.' +
+      escapeHtml(missing) +
+      '</p>' +
+      (items ? '<ul class="ops-metalix-ords">' + items + '</ul>' : '<p>Zip içinde ORD yok.</p>')
+    );
+  }
+
+  function fillMetalixGroups(groups, suggestedDir) {
+    const select = el('metalixGroup');
+    if (select) {
+      const current = select.value;
+      const options = ['<option value="">Tüm gruplar</option>'].concat(
+        (groups || []).map((group) => {
+          const key = group.key || '';
+          const label =
+            (group.material || key) +
+            (group.thickness != null && group.thickness !== '' ? ' ' + group.thickness : '') +
+            (group.qty != null ? ' · ' + group.qty : '');
+          return '<option value="' + escapeHtml(key) + '">' + escapeHtml(label) + '</option>';
+        })
+      );
+      select.innerHTML = options.join('');
+      if (current && Array.from(select.options).some((option) => option.value === current)) {
+        select.value = current;
+      }
+    }
+    const hint = el('metalixHint');
+    if (hint) hint.textContent = suggestedDir ? 'Panel örneği: ' + suggestedDir : '';
+    const dirInput = el('metalixDir');
+    if (dirInput && !dirInput.value.trim() && suggestedDir) dirInput.placeholder = suggestedDir;
+  }
+
+  function reportsHtml(reports) {
+    const rows = (reports || [])
+      .map((report) => {
+        return (
+          '<tr><td>' +
+          escapeHtml(report.id == null ? '—' : String(report.id)) +
+          '</td><td>' +
+          escapeHtml(report.machine || report.source || '—') +
+          '</td><td>' +
+          escapeHtml(report.cut_minutes == null ? '—' : String(report.cut_minutes)) +
+          '</td><td>' +
+          escapeHtml(report.sheet_kg_calc == null ? '—' : String(report.sheet_kg_calc)) +
+          '</td><td>' +
+          escapeHtml(report.pierces == null ? '—' : String(report.pierces)) +
+          '</td></tr>'
+        );
+      })
+      .join('');
+    if (!rows) return '<p>Kayıtlı rapor yok.</p>';
+    return (
+      '<table class="ops-mini"><thead><tr><th>No</th><th>Makine</th><th>Kesim dk</th><th>Sac kg</th><th>Delme</th></tr></thead><tbody>' +
+      rows +
+      '</tbody></table>'
+    );
+  }
+
+  async function runMetalixAction(btn) {
+    if (metalixBusy) return;
+    const action = btn.getAttribute('data-metalix');
+    const api = window.teklifApp;
+    if (!api) return;
+    const values = metalixValues();
+    if (action === 'open' || action === 'start') {
+      const index = Number(btn.getAttribute('data-ord-index'));
+      const file = metalixOrdFiles[index];
+      if (!file) return;
+      values.ordPath = file.path;
+      values.startNest = action === 'start';
+    }
+    metalixBusy = true;
+    setMetalixBusy(true);
+    try {
+      if (action === 'cut') {
+        if (!/^[1-9]\d*$/.test(values.moId)) {
+          metalixNote('Üretim emri numarası geçersiz.', 'warn');
+          return;
+        }
+        if (window.OperasyonView && window.OperasyonView.openWebPath) {
+          window.OperasyonView.openWebPath(
+            'manufacturing/view_manufacturing_order/' + values.moId + '?tab=cut_files_tab'
+          );
+        }
+        return;
+      }
+      if (action === 'dir') {
+        const picked = await api.metalixPickDir();
+        if (picked && picked.canceled) return;
+        if (!picked || !picked.ok) {
+          metalixNote((picked && picked.error) || 'Klasör seçilemedi.', 'warn');
+          return;
+        }
+        metalixDirCache = picked.dir;
+        if (el('metalixDir')) el('metalixDir').value = picked.dir;
+        metalixNote('Klasör seçildi.', '');
+        return;
+      }
+      if (action === 'groups') {
+        const result = await api.metalixGroups(values.moId);
+        if (!result || !result.ok) {
+          if (result && result.needSettings && typeof needSettingsHandler === 'function') {
+            needSettingsHandler();
+          }
+          metalixNote((result && result.error) || 'Gruplar alınamadı.', 'warn');
+          return;
+        }
+        fillMetalixGroups(result.groups, result.suggestedDir);
+        metalixNote((result.groups || []).length + ' grup.', '');
+        return;
+      }
+      if (action === 'ord') {
+        metalixNote('ORD indiriliyor…', '');
+        const result = await api.metalixDownload(values);
+        if (!result || !result.ok) {
+          if (result && result.needSettings && typeof needSettingsHandler === 'function') {
+            needSettingsHandler();
+          }
+          metalixNote((result && result.error) || 'ORD indirilemedi.', 'warn');
+          return;
+        }
+        metalixDirCache = result.dir || values.dir;
+        let html = ordResultHtml(result);
+        if (result.ords && result.ords[0] && api.metalixOpen) {
+          const opened = await api.metalixOpen({
+            ordPath: result.ords[0].path,
+            sheetX: values.sheetX,
+            sheetY: values.sheetY,
+            startNest: false,
+          });
+          const note = opened && (opened.message || opened.error);
+          if (note) html += '<p class="ops-cost-note">' + escapeHtml(note) + '</p>';
+        }
+        metalixWrite(html);
+        return;
+      }
+      if (action === 'open' || action === 'start') {
+        const opened = await api.metalixOpen(values);
+        const host = el('metalixOut');
+        const note = document.createElement('p');
+        note.className = opened && opened.ok ? 'ops-cost-note' : 'ops-banner ops-banner-warn';
+        note.textContent = (opened && (opened.message || opened.error)) || 'ORD açılamadı.';
+        if (host) host.appendChild(note);
+        return;
+      }
+      if (action === 'nest') {
+        const result = await api.metalixSubmitNest(values);
+        if (result && result.canceled) return;
+        if (!result || !result.ok) {
+          if (result && result.needSettings && typeof needSettingsHandler === 'function') {
+            needSettingsHandler();
+          }
+          metalixNote((result && result.error) || 'CSV gönderilemedi.', 'warn');
+          return;
+        }
+        metalixWrite(reportBlock(result.report, result.supply, result.message || 'Rapor kaydedildi.'));
+        return;
+      }
+      if (action === 'reports') {
+        const result = await api.metalixReports(values.moId);
+        if (!result || !result.ok) {
+          if (result && result.needSettings && typeof needSettingsHandler === 'function') {
+            needSettingsHandler();
+          }
+          metalixNote((result && result.error) || 'Raporlar alınamadı.', 'warn');
+          return;
+        }
+        metalixWrite(reportsHtml(result.reports));
+      }
+    } catch (err) {
+      metalixNote((err && err.message) || 'Metalix isteği başarısız.', 'warn');
+    } finally {
+      metalixBusy = false;
+      setMetalixBusy(false);
+    }
+  }
+
   function renderMoPanel(rel) {
     const list = rel.mos || [];
     const rows = list.map((m) => [
@@ -1449,11 +1836,14 @@
       escapeHtml(qtyOf(m)),
       escapeHtml(rowStatus(m)),
     ]);
-    return tableHtml(
-      ['Resim', 'Ürün', 'Miktar', 'Durum'],
-      rows,
-      'Üretim emri yok',
-      'sections.mos.rows boş. Sahte MO üretilmez.'
+    return (
+      metalixDockHtml(list) +
+      tableHtml(
+        ['Resim', 'Ürün', 'Miktar', 'Durum'],
+        rows,
+        'Üretim emri yok',
+        'sections.mos.rows boş. Sahte MO üretilmez.'
+      )
     );
   }
 
@@ -1937,6 +2327,12 @@
     const detail = el('opsDetailPane');
     if (detail && !detail.dataset.bound) {
       detail.dataset.bound = '1';
+      detail.addEventListener('change', (e) => {
+        if (!e.target || e.target.id !== 'metalixMoPick') return;
+        if (!e.target.value) return;
+        const input = el('metalixMo');
+        if (input) input.value = e.target.value;
+      });
       detail.addEventListener('click', (e) => {
         const tab = e.target.closest('[data-tab]');
         if (tab) {
@@ -1947,6 +2343,11 @@
           detail.querySelectorAll('.ops-tab-panel').forEach((p) => {
             p.hidden = p.getAttribute('data-panel') !== detailTab;
           });
+          return;
+        }
+        const metalixBtn = e.target.closest('[data-metalix]');
+        if (metalixBtn) {
+          runMetalixAction(metalixBtn);
           return;
         }
         const webBtn = e.target.closest('[data-web]');

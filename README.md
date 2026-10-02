@@ -46,6 +46,17 @@ npm run dist:mac   # macOS dmg/zip
 5. Örnek klasörü Masaüstüne kopyalar; `4-Teklif` Excel adlarını eşler
 6. Başarı toast’ında **Klasörü Aç**; sidebar’da son teklifler
 
+## Metalix kesim
+
+Operasyon çalışma alanının üretim emri sekmesinde:
+
+1. Üretim emri numarası ve klasör (ör. `D:\Metalix\Gelen`) seçilir.
+2. `GET/POST {apiRoot}/api/v1/mrp/manufacturing_orders/{id}/ord` grupları döner veya ORD zip’ini indirir. Zip aynı klasöre açılır; ORD içindeki ikinci alan bu klasörü içeren tam DXF yoludur (`"sipariş"   "yol.dxf"   min   max   @M=   @T=`).
+3. Windows’ta sac X/Y doluysa ORD, cncKad AutoNest’e `OptiMech.Document.LoadOrdFile` ile verilir. **Yerleşimi başlat** `DoStartAutoNest` çağırır.
+4. Metalix’in Perfex CSV’si `POST .../nest` ile geri gider. Yanıttaki kesim dakikası, sac kilogramı ve delme adedi ekranda gösterilir.
+
+Sunucu seçilen klasöre yazmaz ve paneldeki kayıtlı Metalix klasörünü değiştirmez. Son klasör yalnızca bu bilgisayarın `settings.json` dosyasında durur.
+
 ## Notlar
 
 - JWT `settings.json` içinde saklanır (Windows `%AppData%`, macOS Application Support, Linux `~/.config`); repoda sabit token yoktur.
