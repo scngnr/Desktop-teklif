@@ -153,9 +153,26 @@ function mrpIdentityUrls() {
   return [cfg.baseUrl, cfg.apiRoot, cfg.adminRoot].filter(Boolean);
 }
 
+function apiAuthContext() {
+  const pub = config.getPublic();
+  const hosts = [];
+  [pub.baseUrl, pub.apiRoot, pub.adminRoot].forEach((raw) => {
+    try {
+      if (raw) hosts.push(new URL(raw).host);
+    } catch {
+      // geçersiz adres
+    }
+  });
+  return {
+    token: pub.authToken,
+    headerName: pub.authHeaderName || 'authtoken',
+    hosts,
+  };
+}
+
 async function applyMrpDesktopIdentity() {
   const ses = getMrpSession();
-  desktopIdentity.attachUserAgentRewrite(ses);
+  desktopIdentity.attachUserAgentRewrite(ses, apiAuthContext);
   try {
     await desktopIdentity.applyDesktopIdentity(ses, mrpIdentityUrls());
   } catch (err) {
@@ -574,17 +591,55 @@ ipcMain.handle('metalix:pickDir', async () => {
   return { ok: true, dir };
 });
 
+function sendMetalixResult(payload) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send('metalix:result', payload);
+}
+
+function armNestWatch(dir, moId, profile) {
+  let posting = false;
+  metalix.watchForNestCsv(dir, async (filePath) => {
+    if (posting) return;
+    posting = true;
+    try {
+      const file = metalix.readNestFile(filePath);
+      if (!file.ok) {
+        posting = false;
+        return;
+      }
+      const posted = await metalix.submitNest({
+        moId,
+        profile: profile || 'metalix_perfex',
+        filename: file.filename,
+        csv: file.csv,
+      });
+      sendMetalixResult({
+        ok: !!posted.ok,
+        error: posted.error,
+        report: posted.report || null,
+      });
+      if (posted.ok) metalix.stopNestWatch();
+      else posting = false;
+    } catch (err) {
+      posting = false;
+      sendMetalixResult({ ok: false, error: err.message || String(err) });
+    }
+  });
+}
+
 ipcMain.handle('metalix:download', async (_event, payload = {}) => {
   const missing = metalixAuth();
   if (missing) return missing;
   try {
     const result = await metalix.downloadOrd(payload);
     if (result.ok) {
-      rememberMetalixPrefs({
-        metalixDir: result.dir,
-        metalixSheetX: String(payload.sheetX || ''),
-        metalixSheetY: String(payload.sheetY || ''),
-      });
+      const prefs = { metalixDir: result.dir };
+      if (payload.sheetX) prefs.metalixSheetX = String(payload.sheetX);
+      if (payload.sheetY) prefs.metalixSheetY = String(payload.sheetY);
+      rememberMetalixPrefs(prefs);
+      if (payload.watchCsv) {
+        armNestWatch(result.dir, result.moId, payload.profile);
+      }
     }
     return result;
   } catch (err) {

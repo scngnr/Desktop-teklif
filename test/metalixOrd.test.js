@@ -5,6 +5,7 @@ const path = require('node:path');
 const test = require('node:test');
 const zlib = require('node:zlib');
 const ord = require('../src/metalixOrd');
+const identity = require('../src/desktopIdentity');
 
 function crc32(data) {
   return zlib.crc32(Buffer.from(data)) >>> 0;
@@ -226,6 +227,63 @@ test('zip seçilen klasöre açılır, dışarı yazmaz', () => {
   });
   assert.equal(fs.existsSync(path.join(dest, '..', 'kacak.txt')), false);
   fs.rmSync(dest, { recursive: true, force: true });
+});
+
+test('ORD indirme GET ile okuma iznine düşer, nest POST kalır', () => {
+  const url = ord.rewriteOrdPostToGet(
+    'POST',
+    'https://mrp.example/firma/ps/api/v1/mrp/manufacturing_orders/395/ord',
+    JSON.stringify({ dir: 'C:\\Metalix\\Perfex', group: '' })
+  );
+  const parsed = new URL(url);
+  assert.equal(parsed.pathname.endsWith('/manufacturing_orders/395/ord'), true);
+  assert.equal(parsed.searchParams.get('dir'), 'C:\\Metalix\\Perfex');
+  assert.equal(parsed.searchParams.get('group'), null);
+  assert.equal(
+    ord.rewriteOrdPostToGet(
+      'POST',
+      'https://mrp.example/api/v1/mrp/manufacturing_orders/395/nest',
+      '{"dir":"C:\\\\Metalix\\\\Perfex"}'
+    ),
+    null
+  );
+  assert.equal(ord.ordDownloadNeedsPost({ ok: false, status: 403, code: 'permission_denied' }), false);
+  assert.equal(ord.ordDownloadNeedsPost({ ok: false, status: 405 }), true);
+  const denied = ord.interpretOrdDownload(
+    403,
+    { 'content-type': 'application/json' },
+    Buffer.from(
+      JSON.stringify({
+        status: false,
+        message: 'Your API token does not have the necessary permissions for the requested operation',
+      })
+    )
+  );
+  assert.equal(denied.code, 'permission_denied');
+  assert.match(denied.error, /okuma/);
+});
+
+test('panel düğmesi ve API token yalnızca kendi hostuna yazılır', () => {
+  assert.equal(ord.isMetalixSendLabel("Electron: Metalix'e gönder"), true);
+  assert.equal(ord.isMetalixSendLabel('Electron: Metalix’e gönder'), true);
+  assert.equal(ord.isMetalixSendLabel('ORD ve DXF indir'), false);
+  assert.equal(
+    ord.moIdFromPageUrl('https://mrp.example/admin/manufacturing/view_manufacturing_order/395?tab=cut_files_tab'),
+    '395'
+  );
+  assert.equal(ord.normalizeMetalixGroup('DKP_1.2', 'Tüm gruplar'), '');
+  assert.equal(ord.normalizeMetalixGroup('DKP_1.2', 'DKP 1.2'), 'DKP_1.2');
+  const hosts = ['mrp.example'];
+  assert.equal(identity.isOwnApiUrl('https://mrp.example/firma/ps/api/v1/mrp/manufacturing_orders/395/ord', hosts), true);
+  assert.equal(identity.isOwnApiUrl('https://evil.example/api/v1/mrp/manufacturing_orders/395/ord', hosts), false);
+  assert.equal(identity.isOwnApiUrl('https://mrp.example/admin/manufacturing/view_manufacturing_order/395', hosts), false);
+  const headers = identity.withApiToken({ Authtoken: 'eski', Accept: 'application/json' }, {
+    token: 'yeni-token',
+    headerName: 'authtoken',
+  });
+  assert.equal(headers.authtoken, 'yeni-token');
+  assert.equal(headers.Authtoken, undefined);
+  assert.equal(headers.Accept, 'application/json');
 });
 
 test('LoadOrdFile ortamı sac ölçüsü olmadan kurulmaz ve komut yola gömülmez', () => {

@@ -190,15 +190,59 @@ async function applyDesktopIdentity(ses, urls) {
   return { ok: true, origins, uaToken: UA_TOKEN };
 }
 
-function attachUserAgentRewrite(ses) {
+function isOwnApiUrl(url, hosts) {
+  try {
+    const parsed = new URL(url);
+    if (!hosts || hosts.indexOf(parsed.host) === -1) return false;
+    return /\/api(?:\/|$)/i.test(parsed.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function withApiToken(headers, auth) {
+  const next = Object.assign({}, headers || {});
+  if (!auth || !auth.token) return next;
+  const name = auth.headerName || 'authtoken';
+  Object.keys(next).forEach((key) => {
+    if (key.toLowerCase() === name.toLowerCase()) delete next[key];
+  });
+  next[name] = auth.token;
+  return next;
+}
+
+let requestAuth = null;
+
+function attachUserAgentRewrite(ses, getAuth) {
+  if (typeof getAuth === 'function') requestAuth = getAuth;
   if (!ses || !ses.webRequest || attachUserAgentRewrite._done) return;
   attachUserAgentRewrite._done = true;
+  const ord = require('./metalixOrd');
+  ses.webRequest.onBeforeRequest((details, callback) => {
+    try {
+      const body = (details.uploadData || [])
+        .map((part) => (part && part.bytes ? part.bytes.toString('utf8') : ''))
+        .join('');
+      const next = ord.rewriteOrdPostToGet(details.method, details.url, body);
+      if (next) {
+        callback({ redirectURL: next });
+        return;
+      }
+    } catch {
+      // isteği olduğu gibi bırak
+    }
+    callback({});
+  });
   ses.webRequest.onBeforeSendHeaders((details, callback) => {
     const headers = details.requestHeaders || {};
     const key = Object.keys(headers).find((k) => k.toLowerCase() === 'user-agent');
     const headerKey = key || 'User-Agent';
     headers[headerKey] = withUaToken(headers[headerKey] || '');
-    callback({ requestHeaders: headers });
+    const auth = typeof requestAuth === 'function' ? requestAuth() : null;
+    const stamped = auth && auth.token && isOwnApiUrl(details.url, auth.hosts)
+      ? withApiToken(headers, auth)
+      : headers;
+    callback({ requestHeaders: stamped });
   });
 }
 
@@ -212,6 +256,8 @@ module.exports = {
   parseDesktopAction,
   applyDesktopIdentity,
   attachUserAgentRewrite,
+  isOwnApiUrl,
+  withApiToken,
 };
 
 if (require.main === module) {

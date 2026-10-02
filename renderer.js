@@ -895,7 +895,60 @@ function handleDesktopMenuAction(raw, extra) {
     showView('web', { path: lastWebPath || '' });
     return true;
   }
+  if (action === 'metalix-send') {
+    runWebviewMetalix(extra);
+    return true;
+  }
   return false;
+}
+
+function parseMetalixExtra(extra) {
+  if (!extra) return {};
+  if (typeof extra === 'object') return extra;
+  try {
+    const parsed = JSON.parse(extra);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+async function runWebviewMetalix(extra) {
+  const payload = parseMetalixExtra(extra);
+  if (!cachedHasAuth) {
+    showToast('ORD için Ayarlar’dan API token girin.', 'err', 5500);
+    setSettingsOpen(true);
+    return;
+  }
+  if (!payload.moId) {
+    showToast('Üretim emri numarası sayfa adresinden okunamadı.', 'err', 5500);
+    return;
+  }
+  if (!payload.dir) {
+    showToast('Metalix klasörü boş. Alandaki klasörü doldurun.', 'err', 5500);
+    return;
+  }
+  showToast('ORD indiriliyor…', 'info', 2500);
+  const result = await window.teklifApp.metalixDownload(
+    Object.assign({}, payload, { watchCsv: true })
+  );
+  if (!result || !result.ok) {
+    showToast((result && result.error) || 'ORD indirilemedi.', 'err', 6500);
+    return;
+  }
+  const missing = result.missing > 0 ? ' Eksik DXF: ' + result.missing + '.' : '';
+  showToast('ORD klasöre açıldı.' + missing, 'ok', 5000);
+  if (result.ords && result.ords[0]) {
+    const opened = await window.teklifApp.metalixOpen({
+      ordPath: result.ords[0].path,
+      sheetX: payload.sheetX || '',
+      sheetY: payload.sheetY || '',
+      startNest: false,
+    });
+    if (opened && !opened.ok && opened.error) {
+      showToast(opened.error, 'err', 5500);
+    }
+  }
 }
 
 function requestCreateTeklif() {
@@ -1068,6 +1121,22 @@ pageWebview.addEventListener('will-redirect', (e) => {
   e.preventDefault();
   handleDesktopMenuAction(action);
 });
+
+if (window.teklifApp.onMetalixResult) {
+  window.teklifApp.onMetalixResult((payload) => {
+    if (!payload) return;
+    if (payload.ok) {
+      const minutes = payload.report && payload.report.cut_minutes;
+      showToast(
+        'Nest raporu yüklendi.' + (minutes != null ? ' Kesim ' + minutes + ' dk.' : ''),
+        'ok',
+        6000
+      );
+      return;
+    }
+    showToast(payload.error || 'Nest CSV yüklenemedi.', 'err', 6500);
+  });
+}
 
 pageWebview.addEventListener('ipc-message', (e) => {
   if (e.channel === 'desktop-action') {

@@ -69,12 +69,18 @@ async function downloadOrd(payload) {
   if (!group.ok) return group;
 
   const paths = ord.ordEndpointPaths(mo.moId);
-  const result = await requestFirst(paths.paths, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json; charset=utf-8' },
-    body: JSON.stringify({ dir: dir.dir, group: group.group }),
-  });
-  const interpreted = ord.interpretOrdDownload(result.status, result.headers, result.body);
+  const query = ord.ordDownloadQuery(dir.dir, group.group);
+  const getPaths = paths.paths.map((p) => p + '?' + query);
+  let result = await requestFirst(getPaths, { method: 'GET' });
+  let interpreted = ord.interpretOrdDownload(result.status, result.headers, result.body);
+  if (ord.ordDownloadNeedsPost(interpreted)) {
+    result = await requestFirst(paths.paths, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({ dir: dir.dir, group: group.group }),
+    });
+    interpreted = ord.interpretOrdDownload(result.status, result.headers, result.body);
+  }
   if (!interpreted.ok) {
     interpreted.url = result.url;
     return interpreted;
@@ -265,6 +271,55 @@ function readNestFile(filePath) {
   return ord.prepareNestCsv(path.basename(target), text);
 }
 
+let nestWatchStop = null;
+
+function stopNestWatch() {
+  if (nestWatchStop) {
+    nestWatchStop();
+    nestWatchStop = null;
+  }
+}
+
+function watchForNestCsv(dir, onFile) {
+  stopNestWatch();
+  const root = ord.localDest(dir);
+  let timer = null;
+  let stopped = false;
+  let watcher;
+  try {
+    watcher = fs.watch(root, { recursive: true }, (_event, filename) => {
+      if (stopped || !filename || !/\.(csv|txt)$/i.test(String(filename))) return;
+      const full = path.resolve(root, String(filename));
+      const prefix = root.endsWith(path.sep) ? root : root + path.sep;
+      if (full !== root && !full.startsWith(prefix)) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (stopped) return;
+        fs.stat(full, (err, stat) => {
+          if (stopped || err || !stat.isFile() || stat.size < 1) return;
+          onFile(full);
+        });
+      }, 700);
+    });
+  } catch (err) {
+    return { ok: false, error: err.message || String(err) };
+  }
+  const killer = setTimeout(() => stop(), 20 * 60 * 1000);
+  function stop() {
+    if (stopped) return;
+    stopped = true;
+    clearTimeout(killer);
+    clearTimeout(timer);
+    try {
+      watcher.close();
+    } catch {
+      // kapanmış olabilir
+    }
+  }
+  nestWatchStop = stop;
+  return { ok: true };
+}
+
 module.exports = {
   fetchGroups,
   downloadOrd,
@@ -272,4 +327,6 @@ module.exports = {
   submitNest,
   listReports,
   readNestFile,
+  watchForNestCsv,
+  stopNestWatch,
 };

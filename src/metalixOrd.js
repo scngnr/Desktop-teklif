@@ -292,16 +292,108 @@ function parseJsonBuffer(body) {
   }
 }
 
+function permissionDeniedMessage(json, text) {
+  const raw = String((json && json.message) || text || '');
+  if (/necessary permissions/i.test(raw)) {
+    return 'API token bu işlem için yetkili değil. ORD indirme okuma ile gider; üretim emri okuma (MRP) açık olmalı.';
+  }
+  return '';
+}
+
 function errorFromApi(status, json, text) {
   const code = json && (json.code || (typeof json.error === 'string' ? json.error : ''));
-  const message = explainMetalixCode(code) || (json && json.message) || String(text || '').slice(0, 400);
+  const message =
+    explainMetalixCode(code) ||
+    permissionDeniedMessage(json, text) ||
+    (json && json.message) ||
+    String(text || '').slice(0, 400);
   return {
     ok: false,
     status: status || 0,
-    code: code || '',
+    code: code || (/necessary permissions/i.test(String((json && json.message) || text || '')) ? 'permission_denied' : ''),
     error: message || 'İstek başarısız.',
     json: json || null,
   };
+}
+
+function ordDownloadQuery(dir, group) {
+  const params = new URLSearchParams();
+  params.set('dir', dir);
+  if (group) params.set('group', group);
+  return params.toString();
+}
+
+function isOrdDownloadPath(pathname) {
+  return /\/manufacturing_orders\/\d+\/ord\/?$/i.test(String(pathname || ''));
+}
+
+/**
+ * Paneldeki "Metalix'e gönder" çoğu kurulumda ORD’yi POST ile ister.
+ * POST, API izninde oluşturma sayılır. Aynı indirme GET ile okuma iznine düşer.
+ */
+function rewriteOrdPostToGet(method, url, body) {
+  if (String(method || '').toUpperCase() !== 'POST') return null;
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (!isOrdDownloadPath(parsed.pathname)) return null;
+  const text = Buffer.isBuffer(body) ? body.toString('utf8') : String(body || '');
+  let dir = parsed.searchParams.get('dir') || '';
+  let group = parsed.searchParams.get('group') || '';
+  const trimmed = text.trim();
+  if (trimmed.startsWith('{')) {
+    try {
+      const json = JSON.parse(trimmed);
+      if (json && json.dir) dir = String(json.dir);
+      if (json && json.group != null && String(json.group) !== '') group = String(json.group);
+    } catch {
+      return null;
+    }
+  } else if (trimmed.includes('=')) {
+    const form = new URLSearchParams(trimmed);
+    if (form.get('dir')) dir = form.get('dir');
+    if (form.get('group')) group = form.get('group');
+  }
+  const checked = validateDir(dir);
+  if (!checked.ok) return null;
+  const groupChecked = validateGroup(group);
+  if (!groupChecked.ok) return null;
+  parsed.searchParams.set('dir', checked.dir);
+  if (groupChecked.group) parsed.searchParams.set('group', groupChecked.group);
+  else parsed.searchParams.delete('group');
+  return parsed.toString();
+}
+
+function ordDownloadNeedsPost(interpreted) {
+  if (!interpreted || interpreted.ok) return false;
+  if (interpreted.status === 405 || interpreted.status === 404) return true;
+  if (interpreted.code === 'dir_required') return true;
+  if (interpreted.json && Array.isArray(interpreted.json.groups) && interpreted.json.status !== false) {
+    return true;
+  }
+  return false;
+}
+
+function isMetalixSendLabel(text) {
+  const s = String(text || '').replace(/\s+/g, ' ').trim();
+  return /metalix['’'`]?e\s+g[oö]nder/i.test(s);
+}
+
+function moIdFromPageUrl(url) {
+  const match = String(url || '').match(/view_manufacturing_order\/(\d+)/i);
+  return match ? match[1] : '';
+}
+
+function normalizeMetalixGroup(value, label) {
+  const text = String(label || '').replace(/\s+/g, ' ').trim();
+  if (/t[uü]m gruplar/i.test(text)) return '';
+  const v = String(value || '').trim();
+  if (!v || v === '*' || /^all$/i.test(v)) return '';
+  const checked = validateGroup(v);
+  return checked.ok ? checked.group : '';
 }
 
 function interpretGroups(status, body) {
@@ -578,4 +670,11 @@ module.exports = {
   extractZip,
   localDest,
   readZipEntries,
+  ordDownloadQuery,
+  isOrdDownloadPath,
+  rewriteOrdPostToGet,
+  ordDownloadNeedsPost,
+  isMetalixSendLabel,
+  moIdFromPageUrl,
+  normalizeMetalixGroup,
 };

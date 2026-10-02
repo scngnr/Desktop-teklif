@@ -51,7 +51,7 @@ npm run dist:mac   # macOS dmg/zip
 Operasyon çalışma alanının üretim emri sekmesinde:
 
 1. Üretim emri numarası ve klasör (ör. `D:\Metalix\Gelen`) seçilir.
-2. `GET/POST {apiRoot}/api/v1/mrp/manufacturing_orders/{id}/ord` grupları döner veya ORD zip’ini indirir. Zip aynı klasöre açılır; ORD içindeki ikinci alan bu klasörü içeren tam DXF yoludur (`"sipariş"   "yol.dxf"   min   max   @M=   @T=`).
+2. `GET {apiRoot}/api/v1/mrp/manufacturing_orders/{id}/ord?dir=` ORD zip’ini indirir (okuma izni). Zip aynı klasöre açılır; ORD içindeki ikinci alan bu klasörü içeren tam DXF yoludur (`"sipariş"   "yol.dxf"   min   max   @M=   @T=`). Kesim sekmesindeki **Electron: Metalix'e gönder** bu indirmeyi Ayarlar’daki token ile yapar.
 3. Windows’ta sac X/Y doluysa ORD, cncKad AutoNest’e `OptiMech.Document.LoadOrdFile` ile verilir. **Yerleşimi başlat** `DoStartAutoNest` çağırır.
 4. Metalix’in Perfex CSV’si `POST .../nest` ile geri gider. Yanıttaki kesim dakikası, sac kilogramı ve delme adedi ekranda gösterilir.
 
