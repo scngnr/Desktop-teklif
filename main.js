@@ -394,6 +394,13 @@ function createWindow() {
 
   mainWindow.setMenuBarVisibility(false);
   mainWindow.webContents.on('will-attach-webview', (_event, webPreferences, params) => {
+    // The relative preload attribute can be dropped by Electron when the webview is
+    // recreated during navigation. Bind the trusted guest preload from the main
+    // process so Meseliha always sees window.mrpDesktop.
+    webPreferences.preload = path.join(__dirname, 'preload-webview.js');
+    webPreferences.contextIsolation = true;
+    webPreferences.nodeIntegration = false;
+    webPreferences.sandbox = false;
     try {
       params.useragent = desktopIdentity.withUaToken(
         params.useragent || getMrpSession().getUserAgent()
