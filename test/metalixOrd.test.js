@@ -369,6 +369,13 @@ test('AutoNest.Document ortamı makine, sac ve rapor şablonuyla kurulur', () =>
   assert.equal(ord.METALIX_PS.includes('DoStartAutoNest3(1)'), true);
   assert.equal(ord.METALIX_PS.includes('Save($dsp, $true)'), true);
   assert.equal(ord.METALIX_PS.includes('DoOrderReport($template, $report)'), true);
+  assert.equal(ord.METALIX_PS.includes('Perfex rapor şablonu bulunamadı'), true);
+  assert.equal(ord.METALIX_PS.includes('AutoNest DSP dosyasını kaydetmedi'), true);
+  assert.equal(
+    ord.METALIX_PS.indexOf('Test-Path -LiteralPath $dsp -PathType Leaf') <
+      ord.METALIX_PS.indexOf('DoOrderReport($template, $report)'),
+    true
+  );
   assert.equal(ord.METALIX_PS.includes('GenerateNC'), false);
   assert.equal(ord.METALIX_PS.includes('OptiMech.Document'), false);
   assert.equal(ord.METALIX_PS.includes('ShowWin'), false);
@@ -376,6 +383,7 @@ test('AutoNest.Document ortamı makine, sac ve rapor şablonuyla kurulur', () =>
   assert.equal(config.DEFAULTS.metalixSheetX, '2500');
   assert.equal(config.DEFAULTS.metalixSheetY, '1250');
   assert.equal(config.DEFAULTS.metalixMachineNo, '1');
+  assert.equal(config.DEFAULTS.metalixReportTemplate, 'RPT_AN_ALL_AUT_ENG_Perfex.csv');
 });
 
 test('watchForNestCsv yalnızca Perfex raporunu ve içerik imzasını kabul eder', async () => {

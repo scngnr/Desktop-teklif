@@ -404,7 +404,7 @@ async function loadSettingsForm() {
   inputMetalixSheetX.value = cfg.metalixSheetX || '2500';
   inputMetalixSheetY.value = cfg.metalixSheetY || '1250';
   inputMetalixReportTemplate.value =
-    cfg.metalixReportTemplate || 'C:\\Metalix\\RPT_AN_ALL_AUT_ENG_Perfex.csv';
+    cfg.metalixReportTemplate || 'RPT_AN_ALL_AUT_ENG_Perfex.csv';
   toggleDesktopFab.checked = !!cfg.showDesktopFab;
   settingsHint.textContent = cfg.hasAuthToken
     ? 'Base URL ve Firma adı hem Giriş URL’yi (webview) hem REST API kökünü belirler.'

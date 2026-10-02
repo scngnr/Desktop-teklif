@@ -25,7 +25,7 @@ const DEFAULTS = {
   metalixMachineNo: '1',
   metalixSheetX: '2500',
   metalixSheetY: '1250',
-  metalixReportTemplate: 'C:\\Metalix\\RPT_AN_ALL_AUT_ENG_Perfex.csv',
+  metalixReportTemplate: 'RPT_AN_ALL_AUT_ENG_Perfex.csv',
 };
 
 let runtime = { ...DEFAULTS };
