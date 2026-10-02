@@ -12,7 +12,8 @@ const MESSAGES = {
   dir_invalid: 'Klasör tırnak veya kontrol karakteri içeremez.',
   group_invalid: 'Grup anahtarında bölü veya tırnak var.',
   no_parts: 'Adedi girilmiş parça yok.',
-  dxf_missing: 'Parça var ama DXF okunamadı.',
+  dxf_missing:
+    'Parça var ama sunucu DXF zip’ini okuyamadı. Klasör yolu geçerli; üretim emrindeki parçanın DXF dosyası sunucuda yok, bozuk ya da zip değil.',
   mo_not_found: 'Üretim emri yok.',
   csv_required: 'Gövde CSV değil.',
   csv_empty: 'CSV boş.',
@@ -300,13 +301,51 @@ function permissionDeniedMessage(json, text) {
   return '';
 }
 
+function apiDir(dir) {
+  const s = String(dir || '');
+  if (s.startsWith('\\\\')) return s;
+  return s.replace(/\\/g, '/');
+}
+
+function collectDxfNames(json) {
+  const found = [];
+  if (!json || typeof json !== 'object') return found;
+  const visit = (value, depth) => {
+    if (found.length >= 6 || depth > 4 || value == null) return;
+    if (typeof value === 'string') {
+      const name = value.split(/[/\\]/).pop();
+      if (name && /\.dxf$/i.test(name) && found.indexOf(name) === -1) found.push(name);
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((item) => visit(item, depth + 1));
+      return;
+    }
+    if (typeof value === 'object') {
+      ['file', 'path', 'name', 'filename', 'dxf'].forEach((key) => {
+        if (value[key] != null) visit(value[key], depth + 1);
+      });
+    }
+  };
+  ['files', 'missing', 'parts', 'dxf', 'dxfs'].forEach((key) => visit(json[key], 0));
+  return found;
+}
+
 function errorFromApi(status, json, text) {
   const code = json && (json.code || (typeof json.error === 'string' ? json.error : ''));
-  const message =
+  let message =
     explainMetalixCode(code) ||
     permissionDeniedMessage(json, text) ||
     (json && json.message) ||
     String(text || '').slice(0, 400);
+  if (code === 'dxf_missing') {
+    const parts = [explainMetalixCode('dxf_missing')];
+    const server = json && typeof json.message === 'string' ? json.message.trim() : '';
+    if (server && parts.every((line) => line.indexOf(server) === -1)) parts.push(server);
+    const names = collectDxfNames(json);
+    if (names.length) parts.push('Dosya: ' + names.join(', ') + '.');
+    message = parts.join(' ');
+  }
   return {
     ok: false,
     status: status || 0,
@@ -318,7 +357,7 @@ function errorFromApi(status, json, text) {
 
 function ordDownloadQuery(dir, group) {
   const params = new URLSearchParams();
-  params.set('dir', dir);
+  params.set('dir', apiDir(dir));
   if (group) params.set('group', group);
   return params.toString();
 }
@@ -361,7 +400,7 @@ function rewriteOrdPostToGet(method, url, body) {
   if (!checked.ok) return null;
   const groupChecked = validateGroup(group);
   if (!groupChecked.ok) return null;
-  parsed.searchParams.set('dir', checked.dir);
+  parsed.searchParams.set('dir', apiDir(checked.dir));
   if (groupChecked.group) parsed.searchParams.set('group', groupChecked.group);
   else parsed.searchParams.delete('group');
   return parsed.toString();
@@ -670,6 +709,7 @@ module.exports = {
   extractZip,
   localDest,
   readZipEntries,
+  apiDir,
   ordDownloadQuery,
   isOrdDownloadPath,
   rewriteOrdPostToGet,

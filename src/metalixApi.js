@@ -69,7 +69,8 @@ async function downloadOrd(payload) {
   if (!group.ok) return group;
 
   const paths = ord.ordEndpointPaths(mo.moId);
-  const query = ord.ordDownloadQuery(dir.dir, group.group);
+  const wireDir = ord.apiDir(dir.dir);
+  const query = ord.ordDownloadQuery(wireDir, group.group);
   const getPaths = paths.paths.map((p) => p + '?' + query);
   let result = await requestFirst(getPaths, { method: 'GET' });
   let interpreted = ord.interpretOrdDownload(result.status, result.headers, result.body);
@@ -77,9 +78,24 @@ async function downloadOrd(payload) {
     result = await requestFirst(paths.paths, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify({ dir: dir.dir, group: group.group }),
+      body: JSON.stringify({ dir: wireDir, group: group.group }),
     });
     interpreted = ord.interpretOrdDownload(result.status, result.headers, result.body);
+  } else if (interpreted.code === 'dxf_missing') {
+    try {
+      const posted = await requestFirst(paths.paths, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        body: JSON.stringify({ dir: wireDir, group: group.group }),
+      });
+      const postInterpreted = ord.interpretOrdDownload(posted.status, posted.headers, posted.body);
+      if (postInterpreted.ok) {
+        result = posted;
+        interpreted = postInterpreted;
+      }
+    } catch {
+      // GET zaten DXF zip hatasını verdi; POST ağı keserse o mesaj kalsın.
+    }
   }
   if (!interpreted.ok) {
     interpreted.url = result.url;

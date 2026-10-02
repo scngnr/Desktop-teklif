@@ -166,10 +166,24 @@ test('grup ve zip yanıtları ayrılır', () => {
   const missing = ord.interpretOrdDownload(
     422,
     { 'content-type': 'application/json' },
-    Buffer.from(JSON.stringify({ status: false, code: 'dxf_missing' }))
+    Buffer.from(
+      JSON.stringify({
+        status: false,
+        code: 'dxf_missing',
+        message: 'Parça var ama DXF zip’i okunamadı.',
+        files: [{ path: 'uploads/P12-PARCA.dxf' }],
+      })
+    )
   );
   assert.equal(missing.ok, false);
   assert.equal(missing.code, 'dxf_missing');
+  assert.match(missing.error, /sunucu DXF zip/);
+  assert.match(missing.error, /P12-PARCA\.dxf/);
+  assert.equal(
+    new URLSearchParams(ord.ordDownloadQuery('C:\\Metalix\\Perfex', '')).get('dir'),
+    'C:/Metalix/Perfex'
+  );
+  assert.equal(ord.apiDir('\\\\sunucu\\paylasim\\Metalix'), '\\\\sunucu\\paylasim\\Metalix');
 });
 
 test('nest raporu kesim süresi ve sac kilogramını taşır', () => {
@@ -237,7 +251,7 @@ test('ORD indirme GET ile okuma iznine düşer, nest POST kalır', () => {
   );
   const parsed = new URL(url);
   assert.equal(parsed.pathname.endsWith('/manufacturing_orders/395/ord'), true);
-  assert.equal(parsed.searchParams.get('dir'), 'C:\\Metalix\\Perfex');
+  assert.equal(parsed.searchParams.get('dir'), 'C:/Metalix/Perfex');
   assert.equal(parsed.searchParams.get('group'), null);
   assert.equal(
     ord.rewriteOrdPostToGet(
