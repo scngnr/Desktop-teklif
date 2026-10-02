@@ -27,6 +27,10 @@ const MESSAGES = {
   zip_invalid: 'Zip dosyası okunamadı.',
   zip_unsupported: 'Bu zip sıkıştırması açılmıyor.',
   sheet_size_required: 'AutoNest LoadOrdFile için sac ölçüsü (X ve Y, mm) gerekli.',
+  machine_required: 'AutoNest makine numarası Ayarlar’da tanımlanmalı.',
+  report_template_required: 'Perfex rapor şablonu Ayarlar’da tanımlanmalı.',
+  com_windows_only: 'AutoNest COM yalnızca Windows üzerinde çalışır.',
+  report_missing: 'AutoNest Perfex CSV raporunu üretmedi.',
   ord_missing: 'ORD dosyası bulunamadı.',
   ord_invalid: 'Yalnızca .ord dosyası açılır.',
 };
@@ -150,7 +154,7 @@ function partIdFromDxf(filePath) {
   return match ? match[1] : '';
 }
 
-function decodeOrdText(buffer) {
+function decodeTextBuffer(buffer) {
   const buf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer || '');
   if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) {
     return buf.subarray(3).toString('utf8');
@@ -162,6 +166,16 @@ function decodeOrdText(buffer) {
   } catch {
     return utf8;
   }
+}
+
+function decodeOrdText(buffer) {
+  return decodeTextBuffer(buffer);
+}
+
+function isPerfexNestCsv(filename, text) {
+  if (!/\.csv$/i.test(String(filename || ''))) return false;
+  return /perfex/i.test(path.basename(String(filename || ''))) ||
+    /Parts\s+in\s+Sub\s+Nests/i.test(String(text || ''));
 }
 
 function inspectOrdText(text, dir) {
@@ -578,27 +592,55 @@ function sheetSizeEnv(input) {
   if (!Number.isFinite(sx) || !Number.isFinite(sy) || sx <= 0 || sy <= 0) {
     return fail('sheet_size_required');
   }
+  const machineRaw = String((input && input.machineNo) == null ? '' : input.machineNo).trim();
+  const machineNo = Number(machineRaw);
+  if (!machineRaw || !Number.isInteger(machineNo) || machineNo < 0) {
+    return fail('machine_required');
+  }
+  const reportTemplate = String((input && input.reportTemplate) || '').trim();
+  if (!reportTemplate) return fail('report_template_required');
   return {
     ok: true,
     env: {
       METALIX_ORD: String(input.ordPath || ''),
       METALIX_SX: String(sx),
       METALIX_SY: String(sy),
-      METALIX_START: input.startNest ? '1' : '0',
+      METALIX_MACHINE: String(machineNo),
+      METALIX_REPORT_TEMPLATE: reportTemplate,
     },
   };
 }
 
 const METALIX_PS = [
   "$ErrorActionPreference = 'Stop'",
-  '$doc = New-Object -ComObject OptiMech.Document',
-  '$doc.ShowWin() | Out-Null',
-  '$doc.LoadOrdFile($env:METALIX_ORD, [double]$env:METALIX_SX, [double]$env:METALIX_SY) | Out-Null',
-  "if ($env:METALIX_START -eq '1') {",
-  '  $nest = $doc.DoStartAutoNest()',
+  '$OutputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)',
+  '$ord = $env:METALIX_ORD',
+  '$sx = [double]$env:METALIX_SX',
+  '$sy = [double]$env:METALIX_SY',
+  '$machine = [int]$env:METALIX_MACHINE',
+  '$template = $env:METALIX_REPORT_TEMPLATE',
+  "$dsp = [IO.Path]::ChangeExtension($ord, '.dsp')",
+  "$report = Join-Path ([IO.Path]::GetDirectoryName($ord)) (([IO.Path]::GetFileNameWithoutExtension($ord)) + '_Perfex.csv')",
+  '$d = $null',
+  'try {',
+  '  $d = New-Object -ComObject AutoNest.Document',
+  '  $d.SetCurMachine($machine) | Out-Null',
+  '  $d.LoadOrdFile2($ord, $sx, $sy, 1, $dsp) | Out-Null',
+  '  $d.SheetSizesUseAPISizes(1) | Out-Null',
+  '  $d.SheetSizesClearAPISizes() | Out-Null',
+  '  $d.SheetSizesAddAPISizes($sx, $sy, 50) | Out-Null',
+  '  $nest = $d.DoStartAutoNest3(1)',
+  '  $d.Save($dsp, $true) | Out-Null',
+  '  $d.DoOrderReport($template, $report) | Out-Null',
+  "  if (-not (Test-Path -LiteralPath $report -PathType Leaf)) { throw 'Perfex CSV raporu üretilmedi: ' + $report }",
   "  Write-Output ('NEST ' + $nest)",
-  '} else {',
-  "  Write-Output 'LOADED'",
+  "  Write-Output ('DSP ' + $dsp)",
+  "  Write-Output ('REPORT ' + $report)",
+  '} catch {',
+  '  [Console]::Error.WriteLine($_.Exception.ToString())',
+  '  exit 1',
+  '} finally {',
+  '  if ($null -ne $d) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($d) }',
   '}',
 ].join('\n');
 
@@ -751,7 +793,9 @@ module.exports = {
   parseOrdLine,
   pathIsUnderDir,
   partIdFromDxf,
+  decodeTextBuffer,
   decodeOrdText,
+  isPerfexNestCsv,
   inspectOrdText,
   nestFilename,
   prepareNestCsv,

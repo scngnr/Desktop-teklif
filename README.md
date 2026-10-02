@@ -52,10 +52,10 @@ Operasyon çalışma alanının üretim emri sekmesinde:
 
 1. Üretim emri numarası ve klasör (ör. `D:\Metalix\Gelen`) seçilir.
 2. `GET {apiRoot}/api/v1/mrp/manufacturing_orders/{id}/ord?dir=` ORD zip’ini indirir (okuma izni). Zip aynı klasöre açılır; ORD içindeki ikinci alan bu klasörü içeren tam DXF yoludur (`"sipariş"   "yol.dxf"   min   max   @M=   @T=`). Kesim sekmesindeki **Electron: Metalix'e gönder** bu indirmeyi Ayarlar’daki token ile yapar.
-3. Windows’ta sac X/Y doluysa ORD, cncKad AutoNest’e `OptiMech.Document.LoadOrdFile` ile verilir. **Yerleşimi başlat** `DoStartAutoNest` çağırır.
-4. Metalix’in Perfex CSV’si `POST .../nest` ile geri gider. Yanıttaki kesim dakikası, sac kilogramı ve delme adedi ekranda gösterilir.
+3. Windows’ta her ORD yalnızca `AutoNest.Document` COM nesnesine verilir. Ayarlardaki makine ve sac X/Y ile `LoadOrdFile2`, API sac ölçüleri, `DoStartAutoNest3`, `Save` ve `DoOrderReport` sırasıyla çalışır. cncKad penceresi açılmaz/sürülmez ve `GenerateNC` çağrılmaz.
+4. Her ORD’nin `_Perfex.csv` raporu ayrı ayrı `POST .../nest` ile geri gider. Yanıttaki kesim dakikası, sac kilogramı ve delme adedi ekranda gösterilir.
 
-Sunucu seçilen klasöre yazmaz ve paneldeki kayıtlı Metalix klasörünü değiştirmez. Son klasör yalnızca bu bilgisayarın `settings.json` dosyasında durur.
+Sunucu seçilen klasöre yazmaz ve paneldeki kayıtlı Metalix klasörünü değiştirmez. Son klasör, AutoNest makine numarası, varsayılan sac ölçüsü ve Perfex şablon yolu yalnızca bu bilgisayarın `settings.json` dosyasında durur.
 
 ## Notlar
 

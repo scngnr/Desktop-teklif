@@ -6,6 +6,8 @@ const test = require('node:test');
 const zlib = require('node:zlib');
 const ord = require('../src/metalixOrd');
 const identity = require('../src/desktopIdentity');
+const metalixApi = require('../src/metalixApi');
+const config = require('../src/config');
 
 function crc32(data) {
   return zlib.crc32(Buffer.from(data)) >>> 0;
@@ -127,6 +129,11 @@ test('nest CSV kuralları', () => {
   assert.equal(ord.prepareNestCsv('rapor.csv', 'x'.repeat(ord.CSV_MAX_BYTES + 1)).code, 'csv_too_large');
   assert.equal(ord.nestEndpointPaths(395).paths[0], 'api/v1/mrp/manufacturing_orders/395/nest');
   assert.equal(ord.ordEndpointPaths(395).paths[1], 'api/mrp/manufacturing_orders/395/ord');
+  assert.equal(ord.isPerfexNestCsv('MO-395_DKP_Perfex.csv', 'Order:,DEMO'), true);
+  assert.equal(ord.isPerfexNestCsv('rapor.csv', 'Parts in Sub Nests\nPart,Qty'), true);
+  assert.equal(ord.isPerfexNestCsv('rapor.csv', 'Order:,DEMO'), false);
+  assert.equal(ord.isPerfexNestCsv('rapor.txt', 'Parts in Sub Nests'), false);
+  assert.equal(ord.decodeTextBuffer(Buffer.from([0xdd, 0xfe])), 'İş');
 });
 
 test('grup ve zip yanıtları ayrılır', () => {
@@ -316,19 +323,89 @@ test('panel düğmesi ve API token yalnızca kendi hostuna yazılır', () => {
   assert.equal(headers.Accept, 'application/json');
 });
 
-test('LoadOrdFile ortamı sac ölçüsü olmadan kurulmaz ve komut yola gömülmez', () => {
-  assert.equal(ord.sheetSizeEnv({ ordPath: 'C:\\a.ord', sheetX: '', sheetY: 1250 }).code, 'sheet_size_required');
+test('AutoNest.Document ortamı makine, sac ve rapor şablonuyla kurulur', () => {
+  assert.equal(
+    ord.sheetSizeEnv({
+      ordPath: 'C:\\a.ord',
+      sheetX: '',
+      sheetY: 1250,
+      machineNo: 1,
+      reportTemplate: 'C:\\Metalix\\rapor.csv',
+    }).code,
+    'sheet_size_required'
+  );
+  assert.equal(
+    ord.sheetSizeEnv({
+      ordPath: 'C:\\a.ord',
+      sheetX: 2500,
+      sheetY: 1250,
+      machineNo: '',
+      reportTemplate: 'C:\\Metalix\\rapor.csv',
+    }).code,
+    'machine_required'
+  );
   const env = ord.sheetSizeEnv({
     ordPath: 'D:\\Metalix\\Gelen\\MO-395_DKP_1.2.ORD',
-    sheetX: 2000,
+    sheetX: 2500,
     sheetY: 1250,
-    startNest: true,
+    machineNo: 2,
+    reportTemplate: 'C:\\Metalix\\RPT_AN_ALL_AUT_ENG_Perfex.csv',
   });
-  assert.equal(env.env.METALIX_SX, '2000');
+  assert.equal(env.env.METALIX_SX, '2500');
   assert.equal(env.env.METALIX_SY, '1250');
-  assert.equal(env.env.METALIX_START, '1');
-  assert.equal(ord.METALIX_PS.includes('OptiMech.Document'), true);
-  assert.equal(ord.METALIX_PS.includes('LoadOrdFile'), true);
-  assert.equal(ord.METALIX_PS.includes('DoStartAutoNest'), true);
+  assert.equal(env.env.METALIX_MACHINE, '2');
+  assert.equal(
+    env.env.METALIX_REPORT_TEMPLATE,
+    'C:\\Metalix\\RPT_AN_ALL_AUT_ENG_Perfex.csv'
+  );
+  assert.equal(ord.METALIX_PS.includes('AutoNest.Document'), true);
+  assert.equal(ord.METALIX_PS.includes('SetCurMachine'), true);
+  assert.equal(ord.METALIX_PS.includes('LoadOrdFile2'), true);
+  assert.equal(ord.METALIX_PS.includes('SheetSizesUseAPISizes(1)'), true);
+  assert.equal(ord.METALIX_PS.includes('SheetSizesClearAPISizes()'), true);
+  assert.equal(ord.METALIX_PS.includes('SheetSizesAddAPISizes($sx, $sy, 50)'), true);
+  assert.equal(ord.METALIX_PS.includes('DoStartAutoNest3(1)'), true);
+  assert.equal(ord.METALIX_PS.includes('Save($dsp, $true)'), true);
+  assert.equal(ord.METALIX_PS.includes('DoOrderReport($template, $report)'), true);
+  assert.equal(ord.METALIX_PS.includes('GenerateNC'), false);
+  assert.equal(ord.METALIX_PS.includes('OptiMech.Document'), false);
+  assert.equal(ord.METALIX_PS.includes('ShowWin'), false);
   assert.equal(ord.METALIX_PS.includes('D:\\Metalix'), false);
+  assert.equal(config.DEFAULTS.metalixSheetX, '2500');
+  assert.equal(config.DEFAULTS.metalixSheetY, '1250');
+  assert.equal(config.DEFAULTS.metalixMachineNo, '1');
+});
+
+test('watchForNestCsv yalnızca Perfex raporunu ve içerik imzasını kabul eder', async () => {
+  const dest = fs.mkdtempSync(path.join(os.tmpdir(), 'metalix-watch-'));
+  try {
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Perfex CSV izleme zaman aşımı')), 5000);
+      const watching = metalixApi.watchForNestCsv(dest, (filePath, prepared) => {
+        try {
+          assert.equal(path.basename(filePath), 'rapor.csv');
+          assert.match(prepared.csv, /Parts in Sub Nests/);
+          clearTimeout(timeout);
+          metalixApi.stopNestWatch();
+          resolve();
+        } catch (error) {
+          clearTimeout(timeout);
+          reject(error);
+        }
+      });
+      assert.equal(watching.ok, true);
+      fs.writeFileSync(path.join(dest, 'normal.csv'), 'Order:,DEMO\n', 'utf8');
+      fs.writeFileSync(
+        path.join(dest, 'rapor.csv'),
+        Buffer.concat([
+          Buffer.from('Parts in Sub Nests\r\nParça,'),
+          Buffer.from([0xdd, 0xfe]),
+          Buffer.from('\r\n'),
+        ])
+      );
+    });
+  } finally {
+    metalixApi.stopNestWatch();
+    fs.rmSync(dest, { recursive: true, force: true });
+  }
 });

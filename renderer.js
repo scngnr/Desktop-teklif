@@ -12,6 +12,11 @@ const inputBaseUrl = document.getElementById('inputBaseUrl');
 const inputFirmaAdi = document.getElementById('inputFirmaAdi');
 const girisUrlPreview = document.getElementById('girisUrlPreview');
 const inputJwt = document.getElementById('inputJwt');
+const inputMetalixDir = document.getElementById('inputMetalixDir');
+const inputMetalixMachineNo = document.getElementById('inputMetalixMachineNo');
+const inputMetalixSheetX = document.getElementById('inputMetalixSheetX');
+const inputMetalixSheetY = document.getElementById('inputMetalixSheetY');
+const inputMetalixReportTemplate = document.getElementById('inputMetalixReportTemplate');
 const toggleJwtVisible = document.getElementById('toggleJwtVisible');
 const toggleDesktopFab = document.getElementById('toggleDesktopFab');
 const userNameEl = document.getElementById('userName');
@@ -49,6 +54,7 @@ let cachedBaseUrl = '';
 let cachedFirmaAdi = '';
 let cachedAdminRoot = '';
 let cachedHasAuth = false;
+let cachedConfig = {};
 let historyItemsCache = [];
 let webLoggedIn = false;
 let creatingTeklif = false;
@@ -339,6 +345,7 @@ function updateGirisUrlPreview() {
 
 async function refreshConfigCache() {
   const cfg = await window.teklifApp.getConfig();
+  cachedConfig = cfg || {};
   cachedBaseUrl = cfg.baseUrl || '';
   cachedFirmaAdi = cfg.firmaAdi || '';
   cachedHasAuth = !!cfg.hasAuthToken;
@@ -392,6 +399,12 @@ async function loadSettingsForm() {
   inputBaseUrl.value = cfg.baseUrl || '';
   inputFirmaAdi.value = cfg.firmaAdi || '';
   inputJwt.value = cfg.authToken || '';
+  inputMetalixDir.value = cfg.metalixDir || '';
+  inputMetalixMachineNo.value = cfg.metalixMachineNo || '1';
+  inputMetalixSheetX.value = cfg.metalixSheetX || '2500';
+  inputMetalixSheetY.value = cfg.metalixSheetY || '1250';
+  inputMetalixReportTemplate.value =
+    cfg.metalixReportTemplate || 'C:\\Metalix\\RPT_AN_ALL_AUT_ENG_Perfex.csv';
   toggleDesktopFab.checked = !!cfg.showDesktopFab;
   settingsHint.textContent = cfg.hasAuthToken
     ? 'Base URL ve Firma adı hem Giriş URL’yi (webview) hem REST API kökünü belirler.'
@@ -915,6 +928,7 @@ function parseMetalixExtra(extra) {
 
 async function runWebviewMetalix(extra) {
   const payload = parseMetalixExtra(extra);
+  const cfg = await refreshConfigCache();
   if (!cachedHasAuth) {
     showToast('ORD için Ayarlar’dan API token girin.', 'err', 5500);
     setSettingsOpen(true);
@@ -924,31 +938,54 @@ async function runWebviewMetalix(extra) {
     showToast('Üretim emri numarası sayfa adresinden okunamadı.', 'err', 5500);
     return;
   }
+  payload.dir =
+    String(payload.dir || '').trim() ||
+    String(cfg.metalixDir || '').trim() ||
+    'C:\\Metalix\\Perfex';
   if (!payload.dir) {
-    showToast('Metalix klasörü boş. Alandaki klasörü doldurun.', 'err', 5500);
+    const picked = await window.teklifApp.metalixPickDir();
+    if (!picked || !picked.ok) return;
+    payload.dir = picked.dir;
+  }
+
+  payload.sheetX = String(payload.sheetX || cfg.metalixSheetX || '').trim();
+  payload.sheetY = String(payload.sheetY || cfg.metalixSheetY || '').trim();
+  payload.machineNo = String(payload.machineNo || cfg.metalixMachineNo || '').trim();
+  payload.reportTemplate = String(
+    payload.reportTemplate || cfg.metalixReportTemplate || ''
+  ).trim();
+  if (
+    !(Number(payload.sheetX) > 0) ||
+    !(Number(payload.sheetY) > 0) ||
+    !Number.isInteger(Number(payload.machineNo)) ||
+    Number(payload.machineNo) < 0 ||
+    !payload.reportTemplate
+  ) {
+    showToast(
+      'AutoNest makine numarası, sac X/Y ve Perfex rapor şablonunu Ayarlar’dan girin.',
+      'err',
+      7000
+    );
+    setSettingsOpen(true);
     return;
   }
-  showToast('ORD indiriliyor…', 'info', 2500);
-  const result = await window.teklifApp.metalixDownload(
-    Object.assign({}, payload, { watchCsv: true })
-  );
+
+  showToast('ORD indiriliyor ve AutoNest yerleşimi başlatılıyor…', 'info', 3500);
+  const result = await window.teklifApp.metalixProcess(payload);
   if (!result || !result.ok) {
-    showToast((result && result.error) || 'ORD indirilemedi.', 'err', 6500);
+    showToast((result && result.error) || 'Metalix işlemi tamamlanamadı.', 'err', 10000);
     return;
   }
   const missing = result.missing > 0 ? ' Eksik DXF: ' + result.missing + '.' : '';
-  showToast('ORD klasöre açıldı.' + missing, 'ok', 5000);
-  if (result.ords && result.ords[0]) {
-    const opened = await window.teklifApp.metalixOpen({
-      ordPath: result.ords[0].path,
-      sheetX: payload.sheetX || '',
-      sheetY: payload.sheetY || '',
-      startNest: false,
-    });
-    if (opened && !opened.ok && opened.error) {
-      showToast(opened.error, 'err', 5500);
-    }
-  }
+  showToast(
+    result.processed +
+      ' ORD yerleştirildi, ' +
+      result.uploaded +
+      ' Perfex raporu yüklendi.' +
+      missing,
+    'ok',
+    8000
+  );
 }
 
 function requestCreateTeklif() {
@@ -1071,6 +1108,11 @@ settingsForm.addEventListener('submit', async (e) => {
     baseUrl: inputBaseUrl.value.trim(),
     firmaAdi: inputFirmaAdi.value.trim(),
     authToken: inputJwt.value.trim(),
+    metalixDir: inputMetalixDir.value.trim(),
+    metalixMachineNo: inputMetalixMachineNo.value.trim(),
+    metalixSheetX: inputMetalixSheetX.value.trim(),
+    metalixSheetY: inputMetalixSheetY.value.trim(),
+    metalixReportTemplate: inputMetalixReportTemplate.value.trim(),
     showDesktopFab: !!toggleDesktopFab.checked,
   });
 
@@ -1127,14 +1169,23 @@ if (window.teklifApp.onMetalixResult) {
     if (!payload) return;
     if (payload.ok) {
       const minutes = payload.report && payload.report.cut_minutes;
+      const progress =
+        payload.total > 0 ? ' (' + (Number(payload.index) + 1) + '/' + payload.total + ')' : '';
       showToast(
-        'Nest raporu yüklendi.' + (minutes != null ? ' Kesim ' + minutes + ' dk.' : ''),
+        (payload.message || 'Nest raporu yüklendi.') +
+          progress +
+          (minutes != null ? ' Kesim ' + minutes + ' dk.' : '') +
+          (payload.output ? '\n' + payload.output : ''),
         'ok',
-        6000
+        9000
       );
       return;
     }
-    showToast(payload.error || 'Nest CSV yüklenemedi.', 'err', 6500);
+    showToast(
+      [payload.error || 'Nest CSV yüklenemedi.', payload.output].filter(Boolean).join('\n'),
+      'err',
+      10000
+    );
   });
 }
 

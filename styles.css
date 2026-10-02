@@ -818,10 +818,16 @@ button:disabled {
 /* —— Settings —— */
 .settings-form {
   margin-top: 22px;
-  max-width: 440px;
+  max-width: 560px;
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.settings-inline {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
 }
 
 .field {

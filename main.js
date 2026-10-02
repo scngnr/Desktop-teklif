@@ -568,8 +568,12 @@ function metalixAuth() {
 function rememberMetalixPrefs(partial) {
   const next = {};
   if (partial.metalixDir !== undefined) next.metalixDir = partial.metalixDir;
+  if (partial.metalixMachineNo !== undefined) next.metalixMachineNo = partial.metalixMachineNo;
   if (partial.metalixSheetX !== undefined) next.metalixSheetX = partial.metalixSheetX;
   if (partial.metalixSheetY !== undefined) next.metalixSheetY = partial.metalixSheetY;
+  if (partial.metalixReportTemplate !== undefined) {
+    next.metalixReportTemplate = partial.metalixReportTemplate;
+  }
   if (Object.keys(next).length) config.save(next);
 }
 
@@ -604,33 +608,28 @@ function sendMetalixResult(payload) {
 }
 
 function armNestWatch(dir, moId, profile) {
-  let posting = false;
-  metalix.watchForNestCsv(dir, async (filePath) => {
-    if (posting) return;
-    posting = true;
-    try {
-      const file = metalix.readNestFile(filePath);
-      if (!file.ok) {
-        posting = false;
-        return;
+  let queue = Promise.resolve();
+  metalix.watchForNestCsv(dir, (filePath, prepared) => {
+    queue = queue.then(async () => {
+      try {
+        const file = prepared || metalix.readNestFile(filePath);
+        if (!file.ok) return;
+        const posted = await metalix.submitNest({
+          moId,
+          profile: profile || 'metalix_perfex',
+          filename: file.filename,
+          csv: file.csv,
+        });
+        sendMetalixResult({
+          ok: !!posted.ok,
+          error: posted.error,
+          report: posted.report || null,
+          filename: file.filename,
+        });
+      } catch (err) {
+        sendMetalixResult({ ok: false, error: err.message || String(err) });
       }
-      const posted = await metalix.submitNest({
-        moId,
-        profile: profile || 'metalix_perfex',
-        filename: file.filename,
-        csv: file.csv,
-      });
-      sendMetalixResult({
-        ok: !!posted.ok,
-        error: posted.error,
-        report: posted.report || null,
-      });
-      if (posted.ok) metalix.stopNestWatch();
-      else posting = false;
-    } catch (err) {
-      posting = false;
-      sendMetalixResult({ ok: false, error: err.message || String(err) });
-    }
+    });
   });
 }
 
@@ -654,15 +653,38 @@ ipcMain.handle('metalix:download', async (_event, payload = {}) => {
   }
 });
 
+ipcMain.handle('metalix:process', async (_event, payload = {}) => {
+  const missing = metalixAuth();
+  if (missing) return missing;
+  try {
+    const downloaded = await metalix.downloadOrd(payload);
+    if (!downloaded.ok) return downloaded;
+    rememberMetalixPrefs({
+      metalixDir: downloaded.dir,
+      metalixMachineNo: String(payload.machineNo || ''),
+      metalixSheetX: String(payload.sheetX || ''),
+      metalixSheetY: String(payload.sheetY || ''),
+      metalixReportTemplate: String(payload.reportTemplate || ''),
+    });
+    return await metalix.processOrdBatch(downloaded, payload, (progress) => {
+      sendMetalixResult(progress);
+    });
+  } catch (err) {
+    return { ok: false, error: err.message || String(err) };
+  }
+});
+
 ipcMain.handle('metalix:open', async (_event, payload = {}) => {
   try {
     const result = await metalix.openOrd(payload);
-    if (payload.sheetX || payload.sheetY) {
-      rememberMetalixPrefs({
-        metalixSheetX: String(payload.sheetX || ''),
-        metalixSheetY: String(payload.sheetY || ''),
-      });
+    const prefs = {};
+    if (payload.machineNo !== undefined) prefs.metalixMachineNo = String(payload.machineNo);
+    if (payload.sheetX !== undefined) prefs.metalixSheetX = String(payload.sheetX);
+    if (payload.sheetY !== undefined) prefs.metalixSheetY = String(payload.sheetY);
+    if (payload.reportTemplate !== undefined) {
+      prefs.metalixReportTemplate = String(payload.reportTemplate);
     }
+    rememberMetalixPrefs(prefs);
     return result;
   } catch (err) {
     return { ok: false, error: err.message || String(err) };

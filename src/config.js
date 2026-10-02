@@ -21,8 +21,11 @@ const DEFAULTS = {
   defaultEmail: 'no-reply@local.invalid',
   /** Son seçilen Metalix klasörü — yalnızca bu bilgisayarda */
   metalixDir: '',
-  metalixSheetX: '',
-  metalixSheetY: '',
+  /** AutoNest COM varsayılanları — Ayarlar ekranından değiştirilebilir */
+  metalixMachineNo: '1',
+  metalixSheetX: '2500',
+  metalixSheetY: '1250',
+  metalixReportTemplate: 'C:\\Metalix\\RPT_AN_ALL_AUT_ENG_Perfex.csv',
 };
 
 let runtime = { ...DEFAULTS };
@@ -83,8 +86,20 @@ function load() {
       runtime.showDesktopFab = raw.showDesktopFab;
     }
     if (typeof raw.metalixDir === 'string') runtime.metalixDir = raw.metalixDir.trim();
-    if (typeof raw.metalixSheetX === 'string') runtime.metalixSheetX = raw.metalixSheetX.trim();
-    if (typeof raw.metalixSheetY === 'string') runtime.metalixSheetY = raw.metalixSheetY.trim();
+    if (typeof raw.metalixMachineNo === 'string' && raw.metalixMachineNo.trim()) {
+      runtime.metalixMachineNo = raw.metalixMachineNo.trim();
+    } else if (Number.isFinite(raw.metalixMachineNo)) {
+      runtime.metalixMachineNo = String(raw.metalixMachineNo);
+    }
+    if (typeof raw.metalixSheetX === 'string' && raw.metalixSheetX.trim()) {
+      runtime.metalixSheetX = raw.metalixSheetX.trim();
+    }
+    if (typeof raw.metalixSheetY === 'string' && raw.metalixSheetY.trim()) {
+      runtime.metalixSheetY = raw.metalixSheetY.trim();
+    }
+    if (typeof raw.metalixReportTemplate === 'string' && raw.metalixReportTemplate.trim()) {
+      runtime.metalixReportTemplate = raw.metalixReportTemplate.trim();
+    }
   } catch {
     // varsayılanlarla devam
   }
@@ -111,11 +126,17 @@ function save(partial) {
   if (partial.metalixDir !== undefined) {
     runtime.metalixDir = String(partial.metalixDir || '').trim();
   }
+  if (partial.metalixMachineNo !== undefined) {
+    runtime.metalixMachineNo = String(partial.metalixMachineNo || '').trim();
+  }
   if (partial.metalixSheetX !== undefined) {
     runtime.metalixSheetX = String(partial.metalixSheetX || '').trim();
   }
   if (partial.metalixSheetY !== undefined) {
     runtime.metalixSheetY = String(partial.metalixSheetY || '').trim();
+  }
+  if (partial.metalixReportTemplate !== undefined) {
+    runtime.metalixReportTemplate = String(partial.metalixReportTemplate || '').trim();
   }
 
   const file = settingsPath();
@@ -130,8 +151,10 @@ function save(partial) {
         apiBaseUrl: runtime.apiBaseUrl,
         showDesktopFab: !!runtime.showDesktopFab,
         metalixDir: runtime.metalixDir || '',
+        metalixMachineNo: runtime.metalixMachineNo || '',
         metalixSheetX: runtime.metalixSheetX || '',
         metalixSheetY: runtime.metalixSheetY || '',
+        metalixReportTemplate: runtime.metalixReportTemplate || '',
       },
       null,
       2
@@ -161,8 +184,10 @@ function getPublic() {
     apiBaseUrl: runtime.apiBaseUrl,
     showDesktopFab: !!runtime.showDesktopFab,
     metalixDir: runtime.metalixDir || '',
+    metalixMachineNo: runtime.metalixMachineNo || '',
     metalixSheetX: runtime.metalixSheetX || '',
     metalixSheetY: runtime.metalixSheetY || '',
+    metalixReportTemplate: runtime.metalixReportTemplate || '',
     lastNumberPath: runtime.lastNumberPath,
     authHeaderName: runtime.authHeaderName,
     sampleFolderName: runtime.sampleFolderName,
