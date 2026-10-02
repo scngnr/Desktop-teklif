@@ -102,6 +102,8 @@ test('klasör ve grup kuralları', () => {
   assert.equal(ord.validateMoId('395').moId, '395');
   assert.equal(ord.validateMoId('MO-395').code, 'mo_invalid');
   assert.equal(ord.validateMoId('0').code, 'mo_invalid');
+  assert.equal(ord.isOrdFilePath('C:\\Metalix\\MO-395.ORD'), true);
+  assert.equal(ord.isOrdFilePath('C:\\Metalix\\MO-395.csv'), false);
 });
 
 test('DXF yolu seçilen klasörün altında olmalı', () => {

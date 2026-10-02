@@ -31,6 +31,7 @@ const desktopIdentity = require('./src/desktopIdentity');
 const floatingWindow = require('./src/floatingWindow');
 const perfexMenuInject = require('./src/perfexMenuInject');
 const metalix = require('./src/metalixApi');
+const metalixOrd = require('./src/metalixOrd');
 
 if (process.platform === 'linux') {
   floatingWindow.enableLinuxTransparency(app);
@@ -978,6 +979,13 @@ ipcMain.handle('history:list', () => {
 
 ipcMain.handle('shell:openPath', async (_event, targetPath) => {
   if (!targetPath) return { ok: false };
+  if (metalixOrd.isOrdFilePath(targetPath)) {
+    return {
+      ok: false,
+      code: 'ord_com_only',
+      error: metalixOrd.explainMetalixCode('ord_com_only'),
+    };
+  }
   const result = await shell.openPath(targetPath);
   return { ok: !result, error: result || null };
 });

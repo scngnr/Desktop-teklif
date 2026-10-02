@@ -33,6 +33,7 @@ const MESSAGES = {
   report_missing: 'AutoNest Perfex CSV raporunu üretmedi.',
   ord_missing: 'ORD dosyası bulunamadı.',
   ord_invalid: 'Yalnızca .ord dosyası açılır.',
+  ord_com_only: 'ORD dosyaları Windows ile açılmaz; yalnızca AutoNest COM’a gönderilir.',
 };
 
 function explainMetalixCode(code) {
@@ -152,6 +153,10 @@ function partIdFromDxf(filePath) {
   const base = path.win32.basename(String(filePath || '').replace(/\//g, '\\'));
   const match = base.match(/^P(\d+)-/i);
   return match ? match[1] : '';
+}
+
+function isOrdFilePath(filePath) {
+  return path.extname(String(filePath || '').trim()).toLowerCase() === '.ord';
 }
 
 function decodeTextBuffer(buffer) {
@@ -793,6 +798,7 @@ module.exports = {
   parseOrdLine,
   pathIsUnderDir,
   partIdFromDxf,
+  isOrdFilePath,
   decodeTextBuffer,
   decodeOrdText,
   isPerfexNestCsv,
