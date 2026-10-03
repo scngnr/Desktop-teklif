@@ -12,7 +12,8 @@ const MESSAGES = {
   dir_invalid: 'Klasör tırnak veya kontrol karakteri içeremez.',
   group_invalid: 'Grup anahtarında bölü veya tırnak var.',
   no_parts: 'Adedi girilmiş parça yok.',
-  dxf_missing: 'Parça var ama DXF okunamadı.',
+  dxf_missing:
+    'Parça var ama sunucu DXF zip’ini okuyamadı. Klasör yolu geçerli; üretim emrindeki parçanın DXF dosyası sunucuda yok, bozuk ya da zip değil.',
   mo_not_found: 'Üretim emri yok.',
   csv_required: 'Gövde CSV değil.',
   csv_empty: 'CSV boş.',
@@ -26,8 +27,15 @@ const MESSAGES = {
   zip_invalid: 'Zip dosyası okunamadı.',
   zip_unsupported: 'Bu zip sıkıştırması açılmıyor.',
   sheet_size_required: 'AutoNest LoadOrdFile için sac ölçüsü (X ve Y, mm) gerekli.',
+  machine_required: 'AutoNest makine numarası Ayarlar’da tanımlanmalı.',
+  report_template_required: 'Perfex rapor şablonu Ayarlar’da tanımlanmalı.',
+  script_windows_only: 'Metalix yerleşim betiği yalnızca Windows üzerinde çalışır.',
+  script_missing: 'Paket içindeki Metalix yerleşim betiği bulunamadı.',
+  script_protocol: 'Metalix betiği beklenen CSV/HATA çıktısını vermedi.',
+  report_missing: 'AutoNest Perfex CSV raporunu üretmedi.',
   ord_missing: 'ORD dosyası bulunamadı.',
   ord_invalid: 'Yalnızca .ord dosyası açılır.',
+  ord_com_only: 'ORD dosyaları Windows ile açılmaz; yalnızca AutoNest COM’a gönderilir.',
 };
 
 function explainMetalixCode(code) {
@@ -149,7 +157,11 @@ function partIdFromDxf(filePath) {
   return match ? match[1] : '';
 }
 
-function decodeOrdText(buffer) {
+function isOrdFilePath(filePath) {
+  return path.extname(String(filePath || '').trim()).toLowerCase() === '.ord';
+}
+
+function decodeTextBuffer(buffer) {
   const buf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer || '');
   if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) {
     return buf.subarray(3).toString('utf8');
@@ -161,6 +173,16 @@ function decodeOrdText(buffer) {
   } catch {
     return utf8;
   }
+}
+
+function decodeOrdText(buffer) {
+  return decodeTextBuffer(buffer);
+}
+
+function isPerfexNestCsv(filename, text) {
+  if (!/\.csv$/i.test(String(filename || ''))) return false;
+  return /perfex/i.test(path.basename(String(filename || ''))) ||
+    /Parts\s+in\s+Sub\s+Nests/i.test(String(text || ''));
 }
 
 function inspectOrdText(text, dir) {
@@ -292,16 +314,207 @@ function parseJsonBuffer(body) {
   }
 }
 
+function permissionDeniedMessage(json, text) {
+  const raw = String((json && json.message) || text || '');
+  if (/necessary permissions/i.test(raw)) {
+    return 'API token bu işlem için yetkili değil. ORD indirme okuma ile gider; üretim emri okuma (MRP) açık olmalı.';
+  }
+  return '';
+}
+
+function apiDir(dir) {
+  const s = String(dir || '');
+  if (s.startsWith('\\\\')) return s;
+  return s.replace(/\\/g, '/');
+}
+
+function collectDxfNames(json) {
+  const found = [];
+  if (!json || typeof json !== 'object') return found;
+  const visit = (value, depth) => {
+    if (found.length >= 6 || depth > 4 || value == null) return;
+    if (typeof value === 'string') {
+      const name = value.split(/[/\\]/).pop();
+      if (name && /\.dxf$/i.test(name) && found.indexOf(name) === -1) found.push(name);
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((item) => visit(item, depth + 1));
+      return;
+    }
+    if (typeof value === 'object') {
+      ['file', 'path', 'name', 'filename', 'dxf'].forEach((key) => {
+        if (value[key] != null) visit(value[key], depth + 1);
+      });
+    }
+  };
+  ['files', 'missing', 'parts', 'dxf', 'dxfs'].forEach((key) => visit(json[key], 0));
+  return found;
+}
+
 function errorFromApi(status, json, text) {
   const code = json && (json.code || (typeof json.error === 'string' ? json.error : ''));
-  const message = explainMetalixCode(code) || (json && json.message) || String(text || '').slice(0, 400);
+  let message =
+    explainMetalixCode(code) ||
+    permissionDeniedMessage(json, text) ||
+    (json && json.message) ||
+    String(text || '').slice(0, 400);
+  if (code === 'dxf_missing') {
+    const parts = [explainMetalixCode('dxf_missing')];
+    const server = json && typeof json.message === 'string' ? json.message.trim() : '';
+    if (server && parts.every((line) => line.indexOf(server) === -1)) parts.push(server);
+    const names = collectDxfNames(json);
+    if (names.length) parts.push('Dosya: ' + names.join(', ') + '.');
+    message = parts.join(' ');
+  }
   return {
     ok: false,
     status: status || 0,
-    code: code || '',
+    code: code || (/necessary permissions/i.test(String((json && json.message) || text || '')) ? 'permission_denied' : ''),
     error: message || 'İstek başarısız.',
     json: json || null,
   };
+}
+
+function ordDownloadQuery(dir, group) {
+  const params = new URLSearchParams();
+  params.set('dir', apiDir(dir));
+  if (group) params.set('group', group);
+  return params.toString();
+}
+
+function isOrdDownloadPath(pathname) {
+  return /\/manufacturing_orders\/\d+\/ord\/?$/i.test(String(pathname || ''));
+}
+
+/**
+ * Paneldeki "Metalix'e gönder" çoğu kurulumda ORD’yi POST ile ister.
+ * POST, API izninde oluşturma sayılır. Aynı indirme GET ile okuma iznine düşer.
+ */
+function rewriteOrdPostToGet(method, url, body) {
+  if (String(method || '').toUpperCase() !== 'POST') return null;
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (!isOrdDownloadPath(parsed.pathname)) return null;
+  const text = Buffer.isBuffer(body) ? body.toString('utf8') : String(body || '');
+  let dir = parsed.searchParams.get('dir') || '';
+  let group = parsed.searchParams.get('group') || '';
+  const trimmed = text.trim();
+  if (trimmed.startsWith('{')) {
+    try {
+      const json = JSON.parse(trimmed);
+      if (json && json.dir) dir = String(json.dir);
+      if (json && json.group != null && String(json.group) !== '') group = String(json.group);
+    } catch {
+      return null;
+    }
+  } else if (trimmed.includes('=')) {
+    const form = new URLSearchParams(trimmed);
+    if (form.get('dir')) dir = form.get('dir');
+    if (form.get('group')) group = form.get('group');
+  }
+  const checked = validateDir(dir);
+  if (!checked.ok) return null;
+  const groupChecked = validateGroup(group);
+  if (!groupChecked.ok) return null;
+  parsed.searchParams.set('dir', apiDir(checked.dir));
+  if (groupChecked.group) parsed.searchParams.set('group', groupChecked.group);
+  else parsed.searchParams.delete('group');
+  return parsed.toString();
+}
+
+function ordDownloadNeedsPost(interpreted) {
+  if (!interpreted || interpreted.ok) return false;
+  if (interpreted.status === 405 || interpreted.status === 404) return true;
+  if (interpreted.code === 'dir_required') return true;
+  if (interpreted.json && Array.isArray(interpreted.json.groups) && interpreted.json.status !== false) {
+    return true;
+  }
+  return false;
+}
+
+function isMetalixSendLabel(text) {
+  const s = String(text || '').replace(/\s+/g, ' ').trim();
+  return /metalix['’'`]?e\s+g[oö]nder/i.test(s);
+}
+
+function moIdFromPageUrl(url) {
+  const match = String(url || '').match(/view_manufacturing_order\/(\d+)/i);
+  return match ? match[1] : '';
+}
+
+function normalizeMetalixGroup(value, label) {
+  const text = String(label || '').replace(/\s+/g, ' ').trim();
+  const raw = String(value || '').replace(/\s+/g, ' ').trim();
+  if (/t[uü]m gruplar/i.test(text) || /t[uü]m gruplar/i.test(raw)) return '';
+  if (!raw || raw === '*' || /^all$/i.test(raw)) return '';
+  const checked = validateGroup(raw);
+  return checked.ok ? checked.group : '';
+}
+
+function firstFilled(obj, keys) {
+  for (let i = 0; i < keys.length; i += 1) {
+    const value = obj[keys[i]];
+    if (value != null && String(value).trim()) return value;
+  }
+  return '';
+}
+
+/**
+ * Kesim sekmesi mrpDesktop.metalixOrd(detail) veya
+ * mrp-metalix-ord olayının detail gövdesi.
+ */
+function metalixBridgePayload(input, pageUrl) {
+  let raw = input;
+  if (typeof raw === 'string') {
+    const text = raw.trim();
+    if (text.startsWith('{') || text.startsWith('[')) {
+      try {
+        raw = JSON.parse(text);
+      } catch {
+        raw = {};
+      }
+    } else {
+      raw = {};
+    }
+  }
+  if (raw && typeof raw === 'object' && raw.detail && typeof raw.detail === 'object') {
+    raw = raw.detail;
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) raw = {};
+
+  let moId = '';
+  const moRaw = firstFilled(raw, [
+    'moId',
+    'mo_id',
+    'manufacturing_order_id',
+    'manufacturingOrderId',
+  ]);
+  if (moRaw) {
+    const checked = validateMoId(moRaw);
+    moId = checked.ok ? checked.moId : '';
+  }
+  if (!moId) moId = moIdFromPageUrl(pageUrl);
+
+  const dir = String(
+    firstFilled(raw, ['dir', 'folder', 'metalixDir', 'metalix_dir', 'path']) || ''
+  ).trim();
+  const group = normalizeMetalixGroup(
+    firstFilled(raw, ['group', 'group_key', 'groupKey']),
+    firstFilled(raw, ['group_label', 'groupLabel'])
+  );
+  const payload = { moId, dir, group };
+  const sheetX = firstFilled(raw, ['sheetX', 'sheet_x']);
+  const sheetY = firstFilled(raw, ['sheetY', 'sheet_y']);
+  const profile = firstFilled(raw, ['profile']);
+  if (sheetX) payload.sheetX = String(sheetX);
+  if (sheetY) payload.sheetY = String(sheetY);
+  if (profile) payload.profile = String(profile);
+  return payload;
 }
 
 function interpretGroups(status, body) {
@@ -380,35 +593,72 @@ function interpretNestList(status, body) {
   };
 }
 
-function sheetSizeEnv(input) {
+function nestScriptOptions(input) {
   const sx = Number(input && input.sheetX);
   const sy = Number(input && input.sheetY);
   if (!Number.isFinite(sx) || !Number.isFinite(sy) || sx <= 0 || sy <= 0) {
     return fail('sheet_size_required');
   }
+  const reportTemplate = String((input && input.reportTemplate) || '').trim();
+  if (!reportTemplate) return fail('report_template_required');
   return {
     ok: true,
-    env: {
-      METALIX_ORD: String(input.ordPath || ''),
-      METALIX_SX: String(sx),
-      METALIX_SY: String(sy),
-      METALIX_START: input.startNest ? '1' : '0',
-    },
+    sheetX: sx,
+    sheetY: sy,
+    sheetQty: 50,
+    reportTemplate,
   };
 }
 
-const METALIX_PS = [
-  "$ErrorActionPreference = 'Stop'",
-  '$doc = New-Object -ComObject OptiMech.Document',
-  '$doc.ShowWin() | Out-Null',
-  '$doc.LoadOrdFile($env:METALIX_ORD, [double]$env:METALIX_SX, [double]$env:METALIX_SY) | Out-Null',
-  "if ($env:METALIX_START -eq '1') {",
-  '  $nest = $doc.DoStartAutoNest()',
-  "  Write-Output ('NEST ' + $nest)",
-  '} else {',
-  "  Write-Output 'LOADED'",
-  '}',
-].join('\n');
+function nestScriptArgs(input) {
+  return [
+    '-NoProfile',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-File',
+    String(input.scriptPath),
+    '-OrdFile',
+    String(input.ordPath),
+    '-Template',
+    String(input.template),
+    '-OutCsv',
+    String(input.outCsv),
+    '-SheetX',
+    String(input.sheetX),
+    '-SheetY',
+    String(input.sheetY),
+    '-SheetQty',
+    String(input.sheetQty),
+  ];
+}
+
+function parseNestScriptResult(exitCode, stdout, stderr) {
+  const out = String(stdout || '').replace(/^\uFEFF/, '');
+  const err = String(stderr || '').trim();
+  const lines = out
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const last = lines[lines.length - 1] || '';
+  if (Number(exitCode) === 0 && /^CSV\s+.+/i.test(last)) {
+    return {
+      ok: true,
+      exitCode: 0,
+      csvPath: last.replace(/^CSV\s+/i, '').trim(),
+      stdout: out,
+      stderr: err,
+    };
+  }
+  const hata = [...lines].reverse().find((line) => /^HATA(?:\s|$)/i.test(line));
+  return {
+    ok: false,
+    exitCode: Number.isFinite(Number(exitCode)) ? Number(exitCode) : -1,
+    code: Number(exitCode) === 0 ? 'script_protocol' : 'script_failed',
+    error: hata || err || explainMetalixCode('script_protocol'),
+    stdout: out,
+    stderr: err,
+  };
+}
 
 function findEocd(buf) {
   const min = Math.max(0, buf.length - 22 - 65535);
@@ -548,7 +798,6 @@ module.exports = {
   DIR_MAX,
   CSV_MAX_BYTES,
   NEST_PROFILE,
-  METALIX_PS,
   MESSAGES,
   explainMetalixCode,
   validateMoId,
@@ -559,7 +808,10 @@ module.exports = {
   parseOrdLine,
   pathIsUnderDir,
   partIdFromDxf,
+  isOrdFilePath,
+  decodeTextBuffer,
   decodeOrdText,
+  isPerfexNestCsv,
   inspectOrdText,
   nestFilename,
   prepareNestCsv,
@@ -574,8 +826,19 @@ module.exports = {
   interpretOrdDownload,
   interpretNestPost,
   interpretNestList,
-  sheetSizeEnv,
+  nestScriptOptions,
+  nestScriptArgs,
+  parseNestScriptResult,
   extractZip,
   localDest,
   readZipEntries,
+  apiDir,
+  ordDownloadQuery,
+  isOrdDownloadPath,
+  rewriteOrdPostToGet,
+  ordDownloadNeedsPost,
+  isMetalixSendLabel,
+  moIdFromPageUrl,
+  normalizeMetalixGroup,
+  metalixBridgePayload,
 };

@@ -110,6 +110,28 @@ API: —</p>
               <span>Token’ı göster</span>
             </label>
 
+            <label class="field">
+              <span class="field-label">Metalix klasörü</span>
+              <input type="text" id="inputMetalixDir" name="metalixDir" placeholder="C:\Metalix\Perfex" autocomplete="off" spellcheck="false" />
+            </label>
+
+            <div class="settings-inline">
+              <label class="field">
+                <span class="field-label">Varsayılan sac X (mm)</span>
+                <input type="number" id="inputMetalixSheetX" name="metalixSheetX" min="1" step="0.01" placeholder="2500" />
+              </label>
+              <label class="field">
+                <span class="field-label">Varsayılan sac Y (mm)</span>
+                <input type="number" id="inputMetalixSheetY" name="metalixSheetY" min="1" step="0.01" placeholder="1250" />
+              </label>
+            </div>
+
+            <label class="field">
+              <span class="field-label">Perfex rapor şablonu</span>
+              <input type="text" id="inputMetalixReportTemplate" name="metalixReportTemplate" placeholder="C:\Metalix\RPT_AN_ALL_AUT_ENG_Perfex.csv" autocomplete="off" spellcheck="false" />
+            </label>
+            <p class="field-hint">Paket içindeki hazır Metalix betiği bu sac ölçüsüyle çalışır. Her ORD için ayrı <code>_Perfex.csv</code> üretir; şablonun paket içindeki tam yolu burada gösterilir.</p>
+
             <label class="show-jwt">
               <input type="checkbox" id="toggleDesktopFab" />
               <span>Uygulama açıkken ekran sağ altında “Yeni Teklif” butonu göster</span>

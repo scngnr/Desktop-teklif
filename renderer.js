@@ -12,6 +12,10 @@ const inputBaseUrl = document.getElementById('inputBaseUrl');
 const inputFirmaAdi = document.getElementById('inputFirmaAdi');
 const girisUrlPreview = document.getElementById('girisUrlPreview');
 const inputJwt = document.getElementById('inputJwt');
+const inputMetalixDir = document.getElementById('inputMetalixDir');
+const inputMetalixSheetX = document.getElementById('inputMetalixSheetX');
+const inputMetalixSheetY = document.getElementById('inputMetalixSheetY');
+const inputMetalixReportTemplate = document.getElementById('inputMetalixReportTemplate');
 const toggleJwtVisible = document.getElementById('toggleJwtVisible');
 const toggleDesktopFab = document.getElementById('toggleDesktopFab');
 const userNameEl = document.getElementById('userName');
@@ -49,6 +53,7 @@ let cachedBaseUrl = '';
 let cachedFirmaAdi = '';
 let cachedAdminRoot = '';
 let cachedHasAuth = false;
+let cachedConfig = {};
 let historyItemsCache = [];
 let webLoggedIn = false;
 let creatingTeklif = false;
@@ -339,6 +344,7 @@ function updateGirisUrlPreview() {
 
 async function refreshConfigCache() {
   const cfg = await window.teklifApp.getConfig();
+  cachedConfig = cfg || {};
   cachedBaseUrl = cfg.baseUrl || '';
   cachedFirmaAdi = cfg.firmaAdi || '';
   cachedHasAuth = !!cfg.hasAuthToken;
@@ -392,6 +398,11 @@ async function loadSettingsForm() {
   inputBaseUrl.value = cfg.baseUrl || '';
   inputFirmaAdi.value = cfg.firmaAdi || '';
   inputJwt.value = cfg.authToken || '';
+  inputMetalixDir.value = cfg.metalixDir || '';
+  inputMetalixSheetX.value = cfg.metalixSheetX || '2500';
+  inputMetalixSheetY.value = cfg.metalixSheetY || '1250';
+  inputMetalixReportTemplate.value =
+    cfg.metalixReportTemplate || 'RPT_AN_ALL_AUT_ENG_Perfex.csv';
   toggleDesktopFab.checked = !!cfg.showDesktopFab;
   settingsHint.textContent = cfg.hasAuthToken
     ? 'Base URL ve Firma adı hem Giriş URL’yi (webview) hem REST API kökünü belirler.'
@@ -895,7 +906,81 @@ function handleDesktopMenuAction(raw, extra) {
     showView('web', { path: lastWebPath || '' });
     return true;
   }
+  if (action === 'metalix-send') {
+    runWebviewMetalix(extra);
+    return true;
+  }
   return false;
+}
+
+function parseMetalixExtra(extra) {
+  if (!extra) return {};
+  if (typeof extra === 'object') return extra;
+  try {
+    const parsed = JSON.parse(extra);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+async function runWebviewMetalix(extra) {
+  const payload = parseMetalixExtra(extra);
+  const cfg = await refreshConfigCache();
+  if (!cachedHasAuth) {
+    showToast('ORD için Ayarlar’dan API token girin.', 'err', 5500);
+    setSettingsOpen(true);
+    return;
+  }
+  if (!payload.moId) {
+    showToast('Üretim emri numarası sayfa adresinden okunamadı.', 'err', 5500);
+    return;
+  }
+  payload.dir =
+    String(payload.dir || '').trim() ||
+    String(cfg.metalixDir || '').trim() ||
+    'C:\\Metalix\\Perfex';
+  if (!payload.dir) {
+    const picked = await window.teklifApp.metalixPickDir();
+    if (!picked || !picked.ok) return;
+    payload.dir = picked.dir;
+  }
+
+  payload.sheetX = String(payload.sheetX || cfg.metalixSheetX || '').trim();
+  payload.sheetY = String(payload.sheetY || cfg.metalixSheetY || '').trim();
+  payload.reportTemplate = String(
+    payload.reportTemplate || cfg.metalixReportTemplate || ''
+  ).trim();
+  if (
+    !(Number(payload.sheetX) > 0) ||
+    !(Number(payload.sheetY) > 0) ||
+    !payload.reportTemplate
+  ) {
+    showToast(
+      'Sac X/Y ve paket içindeki Perfex rapor şablonu yolunu Ayarlar’dan kontrol edin.',
+      'err',
+      7000
+    );
+    setSettingsOpen(true);
+    return;
+  }
+
+  showToast('ORD indiriliyor ve AutoNest yerleşimi başlatılıyor…', 'info', 3500);
+  const result = await window.teklifApp.metalixProcess(payload);
+  if (!result || !result.ok) {
+    showToast((result && result.error) || 'Metalix işlemi tamamlanamadı.', 'err', 10000);
+    return;
+  }
+  const missing = result.missing > 0 ? ' Eksik DXF: ' + result.missing + '.' : '';
+  showToast(
+    result.processed +
+      ' ORD yerleştirildi, ' +
+      result.uploaded +
+      ' Perfex raporu yüklendi.' +
+      missing,
+    'ok',
+    8000
+  );
 }
 
 function requestCreateTeklif() {
@@ -1018,6 +1103,10 @@ settingsForm.addEventListener('submit', async (e) => {
     baseUrl: inputBaseUrl.value.trim(),
     firmaAdi: inputFirmaAdi.value.trim(),
     authToken: inputJwt.value.trim(),
+    metalixDir: inputMetalixDir.value.trim(),
+    metalixSheetX: inputMetalixSheetX.value.trim(),
+    metalixSheetY: inputMetalixSheetY.value.trim(),
+    metalixReportTemplate: inputMetalixReportTemplate.value.trim(),
     showDesktopFab: !!toggleDesktopFab.checked,
   });
 
@@ -1068,6 +1157,31 @@ pageWebview.addEventListener('will-redirect', (e) => {
   e.preventDefault();
   handleDesktopMenuAction(action);
 });
+
+if (window.teklifApp.onMetalixResult) {
+  window.teklifApp.onMetalixResult((payload) => {
+    if (!payload) return;
+    if (payload.ok) {
+      const minutes = payload.report && payload.report.cut_minutes;
+      const progress =
+        payload.total > 0 ? ' (' + (Number(payload.index) + 1) + '/' + payload.total + ')' : '';
+      showToast(
+        (payload.message || 'Nest raporu yüklendi.') +
+          progress +
+          (minutes != null ? ' Kesim ' + minutes + ' dk.' : '') +
+          (payload.output ? '\n' + payload.output : ''),
+        'ok',
+        9000
+      );
+      return;
+    }
+    showToast(
+      [payload.error || 'Nest CSV yüklenemedi.', payload.output].filter(Boolean).join('\n'),
+      'err',
+      10000
+    );
+  });
+}
 
 pageWebview.addEventListener('ipc-message', (e) => {
   if (e.channel === 'desktop-action') {

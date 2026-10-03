@@ -21,11 +21,35 @@ const DEFAULTS = {
   defaultEmail: 'no-reply@local.invalid',
   /** Son seçilen Metalix klasörü — yalnızca bu bilgisayarda */
   metalixDir: '',
-  metalixSheetX: '',
-  metalixSheetY: '',
+  /** Metalix betik varsayılanları — Ayarlar ekranından değiştirilebilir */
+  metalixSheetX: '2500',
+  metalixSheetY: '1250',
+  metalixReportTemplate: 'RPT_AN_ALL_AUT_ENG_Perfex.csv',
 };
 
 let runtime = { ...DEFAULTS };
+
+const METALIX_SCRIPT_NAME = 'metalix_nest.ps1';
+const METALIX_TEMPLATE_NAME = 'RPT_AN_ALL_AUT_ENG_Perfex.csv';
+
+function metalixResourceDir() {
+  if (app && app.isPackaged && process.resourcesPath) {
+    return path.join(process.resourcesPath, 'metalix');
+  }
+  return path.join(__dirname, '..', 'resources', 'metalix');
+}
+
+function getMetalixScriptPath() {
+  return path.join(metalixResourceDir(), METALIX_SCRIPT_NAME);
+}
+
+function getMetalixReportTemplate() {
+  const configured = String(runtime.metalixReportTemplate || '').trim();
+  if (!configured || configured === METALIX_TEMPLATE_NAME) {
+    return path.join(metalixResourceDir(), METALIX_TEMPLATE_NAME);
+  }
+  return configured;
+}
 
 function settingsPath() {
   return path.join(app.getPath('userData'), 'settings.json');
@@ -83,8 +107,15 @@ function load() {
       runtime.showDesktopFab = raw.showDesktopFab;
     }
     if (typeof raw.metalixDir === 'string') runtime.metalixDir = raw.metalixDir.trim();
-    if (typeof raw.metalixSheetX === 'string') runtime.metalixSheetX = raw.metalixSheetX.trim();
-    if (typeof raw.metalixSheetY === 'string') runtime.metalixSheetY = raw.metalixSheetY.trim();
+    if (typeof raw.metalixSheetX === 'string' && raw.metalixSheetX.trim()) {
+      runtime.metalixSheetX = raw.metalixSheetX.trim();
+    }
+    if (typeof raw.metalixSheetY === 'string' && raw.metalixSheetY.trim()) {
+      runtime.metalixSheetY = raw.metalixSheetY.trim();
+    }
+    if (typeof raw.metalixReportTemplate === 'string' && raw.metalixReportTemplate.trim()) {
+      runtime.metalixReportTemplate = raw.metalixReportTemplate.trim();
+    }
   } catch {
     // varsayılanlarla devam
   }
@@ -117,6 +148,12 @@ function save(partial) {
   if (partial.metalixSheetY !== undefined) {
     runtime.metalixSheetY = String(partial.metalixSheetY || '').trim();
   }
+  if (partial.metalixReportTemplate !== undefined) {
+    const requested = String(partial.metalixReportTemplate || '').trim();
+    const bundled = path.join(metalixResourceDir(), METALIX_TEMPLATE_NAME);
+    runtime.metalixReportTemplate =
+      requested === bundled ? METALIX_TEMPLATE_NAME : requested;
+  }
 
   const file = settingsPath();
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -132,6 +169,7 @@ function save(partial) {
         metalixDir: runtime.metalixDir || '',
         metalixSheetX: runtime.metalixSheetX || '',
         metalixSheetY: runtime.metalixSheetY || '',
+        metalixReportTemplate: runtime.metalixReportTemplate || '',
       },
       null,
       2
@@ -163,6 +201,7 @@ function getPublic() {
     metalixDir: runtime.metalixDir || '',
     metalixSheetX: runtime.metalixSheetX || '',
     metalixSheetY: runtime.metalixSheetY || '',
+    metalixReportTemplate: getMetalixReportTemplate(),
     lastNumberPath: runtime.lastNumberPath,
     authHeaderName: runtime.authHeaderName,
     sampleFolderName: runtime.sampleFolderName,
@@ -178,5 +217,7 @@ module.exports = {
   buildAdminRoot,
   buildApiRoot,
   normalizeFirmaAdi,
+  getMetalixScriptPath,
+  getMetalixReportTemplate,
   DEFAULTS,
 };

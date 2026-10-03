@@ -1,7 +1,6 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
-const { shell } = require('electron');
 const config = require('./config');
 const ord = require('./metalixOrd');
 
@@ -69,12 +68,34 @@ async function downloadOrd(payload) {
   if (!group.ok) return group;
 
   const paths = ord.ordEndpointPaths(mo.moId);
-  const result = await requestFirst(paths.paths, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json; charset=utf-8' },
-    body: JSON.stringify({ dir: dir.dir, group: group.group }),
-  });
-  const interpreted = ord.interpretOrdDownload(result.status, result.headers, result.body);
+  const wireDir = ord.apiDir(dir.dir);
+  const query = ord.ordDownloadQuery(wireDir, group.group);
+  const getPaths = paths.paths.map((p) => p + '?' + query);
+  let result = await requestFirst(getPaths, { method: 'GET' });
+  let interpreted = ord.interpretOrdDownload(result.status, result.headers, result.body);
+  if (ord.ordDownloadNeedsPost(interpreted)) {
+    result = await requestFirst(paths.paths, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({ dir: wireDir, group: group.group }),
+    });
+    interpreted = ord.interpretOrdDownload(result.status, result.headers, result.body);
+  } else if (interpreted.code === 'dxf_missing') {
+    try {
+      const posted = await requestFirst(paths.paths, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        body: JSON.stringify({ dir: wireDir, group: group.group }),
+      });
+      const postInterpreted = ord.interpretOrdDownload(posted.status, posted.headers, posted.body);
+      if (postInterpreted.ok) {
+        result = posted;
+        interpreted = postInterpreted;
+      }
+    } catch {
+      // GET zaten DXF zip hatasını verdi; POST ağı keserse o mesaj kalsın.
+    }
+  }
   if (!interpreted.ok) {
     interpreted.url = result.url;
     return interpreted;
@@ -140,18 +161,25 @@ function validateOrdFile(ordPath) {
   return { ok: true, ordPath: target };
 }
 
-function runMetalixCom(env) {
+function runMetalixScript(options) {
   return new Promise((resolve) => {
+    const args = ord.nestScriptArgs(options);
     const child = spawn(
       'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-Command', ord.METALIX_PS],
+      args,
       {
-        env: { ...process.env, ...env },
+        env: process.env,
         windowsHide: true,
       }
     );
     let stdout = '';
     let stderr = '';
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
     child.stdout.on('data', (chunk) => {
       stdout += chunk.toString();
     });
@@ -159,66 +187,95 @@ function runMetalixCom(env) {
       stderr += chunk.toString();
     });
     child.on('error', (err) => {
-      resolve({ ok: false, error: err.message, stdout, stderr });
+      finish({ ok: false, error: err.message, stdout, stderr });
     });
     child.on('close', (code) => {
-      resolve({ ok: code === 0, code, stdout, stderr });
+      finish({ ok: code === 0, code, stdout, stderr });
     });
   });
-}
-
-async function openWithShell(ordPath) {
-  const opened = await shell.openPath(ordPath);
-  if (opened) return { ok: false, mode: 'shell', error: opened };
-  return { ok: true, mode: 'shell' };
 }
 
 async function openOrd(payload) {
   const file = validateOrdFile(payload && payload.ordPath);
   if (!file.ok) return file;
-  const startNest = !!(payload && payload.startNest);
-  const sizes = ord.sheetSizeEnv({
-    ordPath: file.ordPath,
-    sheetX: payload && payload.sheetX,
-    sheetY: payload && payload.sheetY,
-    startNest,
+  const cfg = config.get();
+  const options = ord.nestScriptOptions({
+    sheetX: (payload && payload.sheetX) || cfg.metalixSheetX,
+    sheetY: (payload && payload.sheetY) || cfg.metalixSheetY,
+    reportTemplate:
+      (payload && payload.reportTemplate) || config.getMetalixReportTemplate(),
   });
+  if (!options.ok) return options;
 
-  if (startNest && !sizes.ok) return sizes;
-
-  if (process.platform === 'win32' && sizes.ok) {
-    const com = await runMetalixCom(sizes.env);
-    if (com.ok) {
-      const nestMatch = /NEST\s+(-?\d+)/.exec(com.stdout || '');
-      const nestCode = nestMatch ? Number(nestMatch[1]) : null;
-      let message = 'ORD Metalix AutoNest içine yüklendi.';
-      if (startNest) {
-        message =
-          nestCode === 0
-            ? 'Bütün parçalar yerleşti.'
-            : 'Yerleşim bitti. Bazı parçalar yerleşmemiş olabilir.';
-      }
-      return { ok: true, mode: 'com', started: startNest, nestCode, message };
-    }
-    const fallback = await openWithShell(file.ordPath);
+  if (process.platform !== 'win32') {
     return {
-      ok: fallback.ok,
-      mode: 'shell-fallback',
-      error: (com.stderr || com.error || '').trim() || 'OptiMech açılamadı.',
-      message: fallback.ok
-        ? 'ORD dosyası ilişkili programla açıldı.'
-        : 'ORD dosyası açılamadı.',
+      ok: false,
+      code: 'script_windows_only',
+      error: ord.explainMetalixCode('script_windows_only'),
     };
   }
 
-  const opened = await openWithShell(file.ordPath);
-  if (!opened.ok) return opened;
+  const scriptPath = config.getMetalixScriptPath();
+  if (!fs.existsSync(scriptPath)) {
+    return {
+      ok: false,
+      mode: 'script',
+      code: 'script_missing',
+      error: ord.explainMetalixCode('script_missing') + ' ' + scriptPath,
+    };
+  }
+  if (!fs.existsSync(options.reportTemplate)) {
+    return {
+      ok: false,
+      mode: 'script',
+      code: 'report_template_required',
+      error: ord.explainMetalixCode('report_template_required') + ' ' + options.reportTemplate,
+    };
+  }
+
+  const outCsv = path.join(
+    path.dirname(file.ordPath),
+    path.basename(file.ordPath, path.extname(file.ordPath)) + '_Perfex.csv'
+  );
+  const executed = await runMetalixScript({
+    scriptPath,
+    ordPath: file.ordPath,
+    template: options.reportTemplate,
+    outCsv,
+    sheetX: options.sheetX,
+    sheetY: options.sheetY,
+    sheetQty: options.sheetQty,
+  });
+  const parsed = ord.parseNestScriptResult(
+    executed.code,
+    executed.stdout,
+    [executed.error, executed.stderr].filter(Boolean).join('\n')
+  );
+  if (!parsed.ok) {
+    return {
+      ...parsed,
+      mode: 'script',
+    };
+  }
+  const reportPath = parsed.csvPath;
+  if (!reportPath || !fs.existsSync(reportPath)) {
+    return {
+      ok: false,
+      mode: 'script',
+      code: 'report_missing',
+      error: ord.explainMetalixCode('report_missing') + ' ' + (reportPath || outCsv),
+      stdout: parsed.stdout,
+      stderr: parsed.stderr,
+    };
+  }
   return {
     ok: true,
-    mode: 'shell',
-    message: startNest
-      ? 'Yerleşim Windows üzerinde OptiMech.Document ile başlar. ORD dosyası açıldı.'
-      : 'ORD dosyası açıldı.',
+    mode: 'script',
+    started: true,
+    reportPath,
+    stdout: parsed.stdout,
+    stderr: parsed.stderr,
+    message: 'Metalix betiği Perfex raporunu üretti: ' + path.basename(reportPath),
   };
 }
 
@@ -261,8 +318,151 @@ function readNestFile(filePath) {
   } catch (err) {
     return { ok: false, code: 'csv_required', error: err.message || 'CSV okunamadı.' };
   }
-  const text = ord.decodeOrdText(buf);
+  const text = ord.decodeTextBuffer(buf);
   return ord.prepareNestCsv(path.basename(target), text);
+}
+
+function isPerfexNestFile(filePath, prepared) {
+  const file = prepared || readNestFile(filePath);
+  return !!(file && file.ok && ord.isPerfexNestCsv(file.filename, file.csv));
+}
+
+async function processOrdBatch(downloaded, payload, onProgress) {
+  const source = downloaded && downloaded.ok ? downloaded : null;
+  if (!source) return downloaded || { ok: false, error: 'ORD indirilemedi.' };
+  const ords = Array.isArray(source.ords) ? source.ords : [];
+  if (!ords.length) {
+    return { ...source, ok: false, code: 'ord_missing', error: ord.explainMetalixCode('ord_missing') };
+  }
+
+  const results = [];
+  for (let index = 0; index < ords.length; index += 1) {
+    const item = ords[index];
+    const opened = await openOrd({
+      ordPath: item.path,
+      sheetX: payload && payload.sheetX,
+      sheetY: payload && payload.sheetY,
+      reportTemplate: payload && payload.reportTemplate,
+      startNest: true,
+    });
+    const current = { ordPath: item.path, opened };
+    if (!opened.ok) {
+      results.push(current);
+      if (onProgress) onProgress({ ok: false, index, total: ords.length, ...current, error: opened.error });
+      continue;
+    }
+
+    const file = readNestFile(opened.reportPath);
+    current.file = file;
+    if (!file.ok || !isPerfexNestFile(opened.reportPath, file)) {
+      current.posted = {
+        ok: false,
+        code: file.code || 'parse_failed',
+        error: file.error || 'Üretilen dosya Perfex CSV değil.',
+      };
+    } else {
+      current.posted = await submitNest({
+        moId: source.moId,
+        filename: file.filename,
+        profile: 'metalix_perfex',
+        csv: file.csv,
+      });
+    }
+    results.push(current);
+    if (onProgress) {
+      onProgress({
+        ok: !!current.posted.ok,
+        index,
+        total: ords.length,
+        ordPath: item.path,
+        reportPath: opened.reportPath,
+        message: opened.message,
+        output: opened.stdout,
+        report: current.posted.report || null,
+        error: current.posted.error,
+      });
+    }
+  }
+
+  const failed = results.filter((item) => !item.opened.ok || !item.posted || !item.posted.ok);
+  return {
+    ...source,
+    ok: failed.length === 0,
+    processed: results.length,
+    uploaded: results.length - failed.length,
+    results,
+    error: failed.length
+      ? failed
+          .map((item) => path.basename(item.ordPath) + ': ' + ((item.posted && item.posted.error) || item.opened.error))
+          .join('\n')
+      : '',
+  };
+}
+
+let nestWatchStop = null;
+
+function stopNestWatch() {
+  if (nestWatchStop) {
+    nestWatchStop();
+    nestWatchStop = null;
+  }
+}
+
+function watchForNestCsv(dir, onFile) {
+  stopNestWatch();
+  const root = ord.localDest(dir);
+  const timers = new Map();
+  const seen = new Set();
+  let stopped = false;
+  let watcher;
+  try {
+    watcher = fs.watch(root, { recursive: true }, (_event, filename) => {
+      if (stopped || !filename || !/\.csv$/i.test(String(filename))) return;
+      const full = path.resolve(root, String(filename));
+      const prefix = root.endsWith(path.sep) ? root : root + path.sep;
+      if (full !== root && !full.startsWith(prefix)) return;
+      clearTimeout(timers.get(full));
+      timers.set(full, setTimeout(() => {
+        if (stopped) return;
+        fs.stat(full, (err, first) => {
+          if (stopped || err || !first.isFile() || first.size < 1) return;
+          setTimeout(() => {
+            fs.stat(full, (secondErr, second) => {
+              if (
+                stopped ||
+                secondErr ||
+                second.size !== first.size ||
+                second.mtimeMs !== first.mtimeMs
+              ) return;
+              const key = full + ':' + second.size + ':' + second.mtimeMs;
+              if (seen.has(key)) return;
+              const file = readNestFile(full);
+              if (!file.ok || !isPerfexNestFile(full, file)) return;
+              seen.add(key);
+              onFile(full, file);
+            });
+          }, 500);
+        });
+      }, 1000));
+    });
+  } catch (err) {
+    return { ok: false, error: err.message || String(err) };
+  }
+  const killer = setTimeout(() => stop(), 20 * 60 * 1000);
+  function stop() {
+    if (stopped) return;
+    stopped = true;
+    clearTimeout(killer);
+    timers.forEach((timer) => clearTimeout(timer));
+    timers.clear();
+    try {
+      watcher.close();
+    } catch {
+      // kapanmış olabilir
+    }
+  }
+  nestWatchStop = stop;
+  return { ok: true };
 }
 
 module.exports = {
@@ -272,4 +472,8 @@ module.exports = {
   submitNest,
   listReports,
   readNestFile,
+  isPerfexNestFile,
+  processOrdBatch,
+  watchForNestCsv,
+  stopNestWatch,
 };

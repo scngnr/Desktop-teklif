@@ -39,6 +39,7 @@
   let metalixDirCache = '';
   let metalixSheetXCache = '';
   let metalixSheetYCache = '';
+  let metalixReportTemplateCache = '';
   let metalixBusy = false;
   let metalixOrdFiles = [];
   let lastListItems = [];
@@ -107,6 +108,7 @@
       metalixDirCache = String((cfg && cfg.metalixDir) || '');
       metalixSheetXCache = String((cfg && cfg.metalixSheetX) || '');
       metalixSheetYCache = String((cfg && cfg.metalixSheetY) || '');
+      metalixReportTemplateCache = String((cfg && cfg.metalixReportTemplate) || '');
     } catch {
       cachedBaseUrl = '';
     }
@@ -1520,7 +1522,7 @@
       '<label>Profil<input id="metalixProfile" value="metalix_perfex" /></label>' +
       '<label>Sac X mm<input id="metalixSx" inputmode="decimal" value="' +
       escapeHtml(metalixSheetXCache) +
-      '" placeholder="2000" /></label>' +
+      '" placeholder="2500" /></label>' +
       '<label>Sac Y mm<input id="metalixSy" inputmode="decimal" value="' +
       escapeHtml(metalixSheetYCache) +
       '" placeholder="1250" /></label>' +
@@ -1542,11 +1544,15 @@
   function metalixValues() {
     return {
       moId: (el('metalixMo') && el('metalixMo').value.trim()) || '',
-      dir: (el('metalixDir') && el('metalixDir').value.trim()) || '',
+      dir:
+        (el('metalixDir') && el('metalixDir').value.trim()) ||
+        metalixDirCache ||
+        'C:\\Metalix\\Perfex',
       group: (el('metalixGroup') && el('metalixGroup').value) || '',
       profile: (el('metalixProfile') && el('metalixProfile').value.trim()) || 'metalix_perfex',
       sheetX: (el('metalixSx') && el('metalixSx').value.trim()) || '',
       sheetY: (el('metalixSy') && el('metalixSy').value.trim()) || '',
+      reportTemplate: metalixReportTemplateCache,
     };
   }
 
@@ -1763,8 +1769,9 @@
         return;
       }
       if (action === 'ord') {
-        metalixNote('ORD indiriliyor…', '');
-        const result = await api.metalixDownload(values);
+        metalixNote('ORD indiriliyor; her dosya AutoNest ile yerleştiriliyor…', '');
+        const process = api.metalixProcess || api.metalixDownload;
+        const result = await process(values);
         if (!result || !result.ok) {
           if (result && result.needSettings && typeof needSettingsHandler === 'function') {
             needSettingsHandler();
@@ -1774,15 +1781,16 @@
         }
         metalixDirCache = result.dir || values.dir;
         let html = ordResultHtml(result);
-        if (result.ords && result.ords[0] && api.metalixOpen) {
-          const opened = await api.metalixOpen({
-            ordPath: result.ords[0].path,
-            sheetX: values.sheetX,
-            sheetY: values.sheetY,
-            startNest: false,
-          });
-          const note = opened && (opened.message || opened.error);
-          if (note) html += '<p class="ops-cost-note">' + escapeHtml(note) + '</p>';
+        if (result.processed != null) {
+          html +=
+            '<p class="ops-cost-note">' +
+            escapeHtml(
+              result.processed +
+                ' ORD işlendi; ' +
+                result.uploaded +
+                ' Perfex raporu üretim emrine yüklendi.'
+            ) +
+            '</p>';
         }
         metalixWrite(html);
         return;
