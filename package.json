@@ -49,6 +49,14 @@
       {
         "from": "örnek klasör",
         "to": "örnek klasör"
+      },
+      {
+        "from": "resources/metalix",
+        "to": "metalix",
+        "filter": [
+          "metalix_nest.ps1",
+          "RPT_AN_ALL_AUT_ENG_Perfex.csv"
+        ]
       }
     ],
     "win": {

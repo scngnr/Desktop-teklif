@@ -27,8 +27,15 @@ const MESSAGES = {
   zip_invalid: 'Zip dosyası okunamadı.',
   zip_unsupported: 'Bu zip sıkıştırması açılmıyor.',
   sheet_size_required: 'AutoNest LoadOrdFile için sac ölçüsü (X ve Y, mm) gerekli.',
+  machine_required: 'AutoNest makine numarası Ayarlar’da tanımlanmalı.',
+  report_template_required: 'Perfex rapor şablonu Ayarlar’da tanımlanmalı.',
+  script_windows_only: 'Metalix yerleşim betiği yalnızca Windows üzerinde çalışır.',
+  script_missing: 'Paket içindeki Metalix yerleşim betiği bulunamadı.',
+  script_protocol: 'Metalix betiği beklenen CSV/HATA çıktısını vermedi.',
+  report_missing: 'AutoNest Perfex CSV raporunu üretmedi.',
   ord_missing: 'ORD dosyası bulunamadı.',
   ord_invalid: 'Yalnızca .ord dosyası açılır.',
+  ord_com_only: 'ORD dosyaları Windows ile açılmaz; yalnızca AutoNest COM’a gönderilir.',
 };
 
 function explainMetalixCode(code) {
@@ -150,7 +157,11 @@ function partIdFromDxf(filePath) {
   return match ? match[1] : '';
 }
 
-function decodeOrdText(buffer) {
+function isOrdFilePath(filePath) {
+  return path.extname(String(filePath || '').trim()).toLowerCase() === '.ord';
+}
+
+function decodeTextBuffer(buffer) {
   const buf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer || '');
   if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) {
     return buf.subarray(3).toString('utf8');
@@ -162,6 +173,85 @@ function decodeOrdText(buffer) {
   } catch {
     return utf8;
   }
+}
+
+function decodeOrdText(buffer) {
+  return decodeTextBuffer(buffer);
+}
+
+function isPerfexNestCsv(filename, text) {
+  if (!/\.csv$/i.test(String(filename || ''))) return false;
+  return /perfex/i.test(path.basename(String(filename || ''))) ||
+    /Parts\s+in\s+Sub\s+Nests/i.test(String(text || ''));
+}
+
+function parseCsvLine(line) {
+  const cells = [];
+  let value = '';
+  let quoted = false;
+  const raw = String(line || '');
+  for (let i = 0; i < raw.length; i += 1) {
+    const char = raw[i];
+    if (char === '"') {
+      if (quoted && raw[i + 1] === '"') {
+        value += '"';
+        i += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (char === ',' && !quoted) {
+      cells.push(value.trim());
+      value = '';
+    } else {
+      value += char;
+    }
+  }
+  cells.push(value.trim());
+  return cells;
+}
+
+function inspectPerfexNestCsv(text) {
+  const lines = String(text || '').split(/\r?\n/);
+  let header = null;
+  let inParts = false;
+  const parts = [];
+  for (const line of lines) {
+    if (/^\s*Parts\s+in\s+Order\s*:/i.test(line)) {
+      inParts = true;
+      header = null;
+      continue;
+    }
+    if (inParts && /^\s*Parts\s+in\s+Sub\s+Nests\s*:/i.test(line)) break;
+    if (!inParts || !line.trim() || /^[-\s,]+$/.test(line)) continue;
+    const cells = parseCsvLine(line);
+    if (!header) {
+      const normalized = cells.map((cell) => cell.toLowerCase().replace(/\s+/g, ' '));
+      if (normalized.includes('num') && normalized.includes('name')) header = normalized;
+      continue;
+    }
+    const fileIndex = cells.findIndex((cell) => /\.(?:dft|dxf)\b/i.test(cell));
+    if (fileIndex < 0) continue;
+    const filePath = cells[fileIndex];
+    const idMatch = path.win32.basename(filePath.replace(/\//g, '\\')).match(/^P(\d+)(?:[-_.]|$)/i);
+    const indexOf = (name) => header.indexOf(name);
+    const cellAt = (name) => {
+      const index = indexOf(name);
+      return index >= 0 ? cells[index] || '' : '';
+    };
+    parts.push({
+      id: idMatch ? idMatch[1] : '',
+      number: cellAt('num'),
+      name: cellAt('name'),
+      filePath,
+      orderedQty: cellAt('ordered qty'),
+      placedQty: cellAt('placed qty'),
+    });
+  }
+  return {
+    partCount: parts.length,
+    partIds: [...new Set(parts.map((part) => part.id).filter(Boolean))],
+    parts,
+  };
 }
 
 function inspectOrdText(text, dir) {
@@ -201,7 +291,8 @@ function prepareNestCsv(filename, csv) {
   if (!text.trim()) return fail('csv_empty');
   const bytes = Buffer.byteLength(text, 'utf8');
   if (bytes > CSV_MAX_BYTES) return fail('csv_too_large');
-  return { ok: true, filename: named.filename, csv: text, bytes };
+  const inspected = inspectPerfexNestCsv(text);
+  return { ok: true, filename: named.filename, csv: text, bytes, ...inspected };
 }
 
 function nestProfile(profile) {
@@ -572,35 +663,72 @@ function interpretNestList(status, body) {
   };
 }
 
-function sheetSizeEnv(input) {
+function nestScriptOptions(input) {
   const sx = Number(input && input.sheetX);
   const sy = Number(input && input.sheetY);
   if (!Number.isFinite(sx) || !Number.isFinite(sy) || sx <= 0 || sy <= 0) {
     return fail('sheet_size_required');
   }
+  const reportTemplate = String((input && input.reportTemplate) || '').trim();
+  if (!reportTemplate) return fail('report_template_required');
   return {
     ok: true,
-    env: {
-      METALIX_ORD: String(input.ordPath || ''),
-      METALIX_SX: String(sx),
-      METALIX_SY: String(sy),
-      METALIX_START: input.startNest ? '1' : '0',
-    },
+    sheetX: sx,
+    sheetY: sy,
+    sheetQty: 50,
+    reportTemplate,
   };
 }
 
-const METALIX_PS = [
-  "$ErrorActionPreference = 'Stop'",
-  '$doc = New-Object -ComObject OptiMech.Document',
-  '$doc.ShowWin() | Out-Null',
-  '$doc.LoadOrdFile($env:METALIX_ORD, [double]$env:METALIX_SX, [double]$env:METALIX_SY) | Out-Null',
-  "if ($env:METALIX_START -eq '1') {",
-  '  $nest = $doc.DoStartAutoNest()',
-  "  Write-Output ('NEST ' + $nest)",
-  '} else {',
-  "  Write-Output 'LOADED'",
-  '}',
-].join('\n');
+function nestScriptArgs(input) {
+  return [
+    '-NoProfile',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-File',
+    String(input.scriptPath),
+    '-OrdFile',
+    String(input.ordPath),
+    '-Template',
+    String(input.template),
+    '-OutCsv',
+    String(input.outCsv),
+    '-SheetX',
+    String(input.sheetX),
+    '-SheetY',
+    String(input.sheetY),
+    '-SheetQty',
+    String(input.sheetQty),
+  ];
+}
+
+function parseNestScriptResult(exitCode, stdout, stderr) {
+  const out = String(stdout || '').replace(/^\uFEFF/, '');
+  const err = String(stderr || '').trim();
+  const lines = out
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const last = lines[lines.length - 1] || '';
+  if (Number(exitCode) === 0 && /^CSV\s+.+/i.test(last)) {
+    return {
+      ok: true,
+      exitCode: 0,
+      csvPath: last.replace(/^CSV\s+/i, '').trim(),
+      stdout: out,
+      stderr: err,
+    };
+  }
+  const hata = [...lines].reverse().find((line) => /^HATA(?:\s|$)/i.test(line));
+  return {
+    ok: false,
+    exitCode: Number.isFinite(Number(exitCode)) ? Number(exitCode) : -1,
+    code: Number(exitCode) === 0 ? 'script_protocol' : 'script_failed',
+    error: hata || err || explainMetalixCode('script_protocol'),
+    stdout: out,
+    stderr: err,
+  };
+}
 
 function findEocd(buf) {
   const min = Math.max(0, buf.length - 22 - 65535);
@@ -740,7 +868,6 @@ module.exports = {
   DIR_MAX,
   CSV_MAX_BYTES,
   NEST_PROFILE,
-  METALIX_PS,
   MESSAGES,
   explainMetalixCode,
   validateMoId,
@@ -751,7 +878,12 @@ module.exports = {
   parseOrdLine,
   pathIsUnderDir,
   partIdFromDxf,
+  isOrdFilePath,
+  decodeTextBuffer,
   decodeOrdText,
+  isPerfexNestCsv,
+  parseCsvLine,
+  inspectPerfexNestCsv,
   inspectOrdText,
   nestFilename,
   prepareNestCsv,
@@ -766,7 +898,9 @@ module.exports = {
   interpretOrdDownload,
   interpretNestPost,
   interpretNestList,
-  sheetSizeEnv,
+  nestScriptOptions,
+  nestScriptArgs,
+  parseNestScriptResult,
   extractZip,
   localDest,
   readZipEntries,

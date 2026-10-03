@@ -1,0 +1,39 @@
+
+Order:,@O_NAME
+Date:,@O_DATE
+Time:,@O_TIME
+Machine:,@MODEL_NAME
+Notes:,@O_UD_NOTES
+Total number of sheets:,@O_SHTS_QNT
+Total Number of SubNests:,@O_SNS_QNT
+Order Efficiency:,@O_EFF
+Order Scrap:,@O_SCRAP
+Total ordered parts:,@O_REQ_QNT
+Total Placed Parts:,@OT_PARTS
+Total process time:,@O_TOTAL_PROC_TIME
+Total cut length:,@O_CUT_LEN
+Total cut time:,@O_CUT_TIME
+Total pierces:,@O_PRC_QTY
+Total parts area:,@O_TP_AREA
+Total sheets area:,@O_TOTAL_AREA
+
+Sub Nests in Order:
+----------------------------------------------------------------------------------------------------
+Plate#,Size X,Size Y,Material,Thickness,Qty,Area,Weight,Skeleton weight,Efficiency,Proc time,Proc time for N,Cut length,Cut time,Pierces,Parts qty,NST
+----------------------------------------------------------------------------------------------------
+@SN_NUM,@SN_SIZE_X,@SN_SIZE_Y,@SN_MAT,@SN_THK,@SN_QNT,@SN_AREA,@SN_WHT,@SN_ABFAL_WHT,@SN_EFF,@SN_TOTAL_PROC_TIME,@SN_TOTAL_PROC_TIME_FOR_N,@SN_CUT_LEN,@SN_CUT_TIME,@SN_PIERCE_QTY,@TP_QNT,@SN_NST
+----------------------------------------------------------------------------------------------------
+
+Parts in Order:
+---------------------------------------------------------------------------------------------------------
+Num,Name,Size X,Size Y,Area,Perimeter,Material,Thickness,Ordered Qty,Placed Qty,Weight,Gross,Cut length,Cut time,Pierces,Machine time
+---------------------------------------------------------------------------------------------------------
+@P_NUM,@P_F_PATH,@P_SIZE_X,@P_SIZE_Y,@P_AREA,@P_PER,@P_MAT,@P_THK,@P_REQ_QNT,@PT_QNT,@P_WHT,@P_WEIGHT_GROSS,@P_COSTING_CUT_LEN,@P_COSTING_CUT_TIME,@P_COSTING_PIERCE_QNT,@P_TOTAL_CUT_MACHINE_TIME
+---------------------------------------------------------------------------------------------------------
+
+Parts in Sub Nests:
+--------------------------------------------------------------
+Order,SN_NUM,P_NUM,Placed Qty,SN_Qty
+--------------------------------------------------------------
+@O_NAME,@SN_NUM,@P_NUM,@P_PLC_QNT,@SN_QNT
+--------------------------------------------------------------

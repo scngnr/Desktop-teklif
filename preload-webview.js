@@ -41,6 +41,37 @@ try {
 }
 
 let metalixBridgeAt = 0;
+let metalixControl = null;
+
+function metalixStatusElement() {
+  let status = document.querySelector('[data-metalix-desktop-status]');
+  if (status) return status;
+  status = document.createElement('p');
+  status.setAttribute('data-metalix-desktop-status', '1');
+  status.setAttribute('role', 'status');
+  status.style.margin = '8px 0 0';
+  status.style.fontSize = '13px';
+  status.style.lineHeight = '1.4';
+  const anchor =
+    metalixControl ||
+    Array.from(document.querySelectorAll('a, button')).find((item) =>
+      isMetalixSendLabel(controlLabel(item))
+    );
+  if (anchor && anchor.parentNode) anchor.insertAdjacentElement('afterend', status);
+  else document.body.appendChild(status);
+  return status;
+}
+
+function showMetalixStatus(payload) {
+  if (!payload) return;
+  const status = metalixStatusElement();
+  status.textContent = String(payload.message || '');
+  status.style.color =
+    payload.state === 'error' ? '#b42318' : payload.state === 'done' ? '#067647' : '#175cd3';
+  status.style.fontWeight = payload.state === 'working' ? '600' : '500';
+}
+
+ipcRenderer.on('metalix-status', (_event, payload) => showMetalixStatus(payload));
 
 function deliverMetalix(input) {
   const now = Date.now();
@@ -172,6 +203,11 @@ document.addEventListener(
     if (!el) return;
 
     if (isMetalixSendLabel(controlLabel(el))) {
+      metalixControl = el;
+      showMetalixStatus({
+        state: 'working',
+        message: 'Electron’a gönderildi; işlem başlatılıyor…',
+      });
       const scraped = metalixPayload(el);
       setTimeout(() => {
         if (Date.now() - metalixBridgeAt < 1200) return;
