@@ -675,7 +675,7 @@ function nestScriptOptions(input) {
     ok: true,
     sheetX: sx,
     sheetY: sy,
-    sheetQty: 50,
+    sheetQty: 200,
     reportTemplate,
   };
 }
@@ -711,10 +711,25 @@ function parseNestScriptResult(exitCode, stdout, stderr) {
     .filter(Boolean);
   const last = lines[lines.length - 1] || '';
   if (Number(exitCode) === 0 && /^CSV\s+.+/i.test(last)) {
+    const incompleteLine = lines.find((line) => /^UYARI\s+yerlesmeyen parca:\s*\d+/i.test(line));
+    const incompleteMatch =
+      incompleteLine && incompleteLine.match(/^UYARI\s+yerlesmeyen parca:\s*(\d+)/i);
+    const countsLine = lines.find((line) => /\bPARCA\s+siparis=\d+\s+yerlesen=\d+/i.test(line));
+    const countsMatch =
+      countsLine && countsLine.match(/\bPARCA\s+siparis=(\d+)\s+yerlesen=(\d+)/i);
+    const unplacedParts = incompleteMatch ? Number(incompleteMatch[1]) : 0;
     return {
       ok: true,
       exitCode: 0,
       csvPath: last.replace(/^CSV\s+/i, '').trim(),
+      incomplete: unplacedParts > 0,
+      unplacedParts,
+      orderedParts: countsMatch ? Number(countsMatch[1]) : null,
+      placedParts: countsMatch ? Number(countsMatch[2]) : null,
+      warning:
+        unplacedParts > 0
+          ? unplacedParts + ' parça yerleşmedi. Sac adedini artırıp tekrar deneyin.'
+          : '',
       stdout: out,
       stderr: err,
     };

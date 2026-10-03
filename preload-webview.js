@@ -67,7 +67,13 @@ function showMetalixStatus(payload) {
   const status = metalixStatusElement();
   status.textContent = String(payload.message || '');
   status.style.color =
-    payload.state === 'error' ? '#b42318' : payload.state === 'done' ? '#067647' : '#175cd3';
+    payload.state === 'error'
+      ? '#b42318'
+      : payload.state === 'warning'
+        ? '#b54708'
+        : payload.state === 'done'
+          ? '#067647'
+          : '#175cd3';
   status.style.fontWeight = payload.state === 'working' ? '600' : '500';
 }
 

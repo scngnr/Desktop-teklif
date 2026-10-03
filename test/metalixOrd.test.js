@@ -362,7 +362,7 @@ test('hazır Metalix betiği belirtilen parametrelerle çalıştırılır', () =
   });
   assert.equal(options.sheetX, 2500);
   assert.equal(options.sheetY, 1250);
-  assert.equal(options.sheetQty, 50);
+  assert.equal(options.sheetQty, 200);
   assert.equal(
     options.reportTemplate,
     'C:\\Metalix\\RPT_AN_ALL_AUT_ENG_Perfex.csv'
@@ -375,7 +375,7 @@ test('hazır Metalix betiği belirtilen parametrelerle çalıştırılır', () =
       outCsv: 'C:\\Metalix\\MO_Perfex.csv',
       sheetX: 2500,
       sheetY: 1250,
-      sheetQty: 50,
+      sheetQty: 200,
     }),
     [
       '-NoProfile',
@@ -394,13 +394,29 @@ test('hazır Metalix betiği belirtilen parametrelerle çalıştırılır', () =
       '-SheetY',
       '1250',
       '-SheetQty',
-      '50',
+      '200',
     ]
   );
   assert.equal(
     ord.parseNestScriptResult(0, '09:00 tamam\r\nCSV C:\\Metalix\\MO_Perfex.csv\r\n', '').csvPath,
     'C:\\Metalix\\MO_Perfex.csv'
   );
+  const incomplete = ord.parseNestScriptResult(
+    0,
+    [
+      '10:00:00 PARCA siparis=2 yerlesen=1',
+      'UYARI yerlesmeyen parca: 1',
+      '10:00:00 UYARI detay: siparis=2 yerlesen=1 sac_ust_siniri=200',
+      'CSV C:\\Metalix\\MO_Perfex.csv',
+    ].join('\r\n'),
+    ''
+  );
+  assert.equal(incomplete.ok, true);
+  assert.equal(incomplete.incomplete, true);
+  assert.equal(incomplete.unplacedParts, 1);
+  assert.equal(incomplete.orderedParts, 2);
+  assert.equal(incomplete.placedParts, 1);
+  assert.match(incomplete.warning, /1 parça yerleşmedi/);
   assert.equal(
     ord.parseNestScriptResult(5, '09:00 deneme\r\nHATA P12.dxf AutoCut basarisiz\r\n', '').error,
     'HATA P12.dxf AutoCut basarisiz'
@@ -418,7 +434,7 @@ test('Metalix kaynakları yüklenen dosyalarla byte-byte aynıdır', () => {
   );
   assert.equal(
     crypto.createHash('sha256').update(script).digest('hex'),
-    'fb5b06778ae2f8947aa1502044caf8d50f48fc9908323ff501f3322d437039c0'
+    '77ef342b9abab37240f20284017e2686c7e71114c0e3f954181b39a1134ffca9'
   );
   assert.equal(
     crypto.createHash('sha256').update(template).digest('hex'),

@@ -1005,25 +1005,34 @@ async function runWebviewMetalix(extra) {
           : '') +
         '.'
       : '';
+  const incompleteText = result.incomplete
+    ? ' UYARI: ' + result.unplacedParts + ' parça yerleşmedi. Sac adedini artırıp tekrar deneyin.'
+    : '';
   sendMetalixPageStatus(
-    'done',
-    'Tamamlandı: ' +
+    result.incomplete ? 'warning' : 'done',
+    (result.incomplete ? 'Uyarıyla tamamlandı: ' : 'Tamamlandı: ') +
       result.processed +
       ' ORD yerleştirildi, ' +
       result.uploaded +
       ' rapor yüklendi.' +
       partText +
-      missing,
-    { partCount: result.partCount || 0, partIds: result.partIds || [] }
+      missing +
+      incompleteText,
+    {
+      partCount: result.partCount || 0,
+      partIds: result.partIds || [],
+      unplacedParts: result.unplacedParts || 0,
+    }
   );
   showToast(
     result.processed +
       ' ORD yerleştirildi, ' +
       result.uploaded +
       ' Perfex raporu yüklendi.' +
-      missing,
-    'ok',
-    8000
+      missing +
+      incompleteText,
+    result.incomplete ? 'info' : 'ok',
+    result.incomplete ? 12000 : 8000
   );
 }
 
@@ -1219,19 +1228,29 @@ if (window.teklifApp.onMetalixResult) {
               : '') +
             '.'
           : '';
+      const warning = payload.incomplete
+        ? ' UYARI: ' +
+          payload.unplacedParts +
+          ' parça yerleşmedi. Sac adedini artırıp tekrar deneyin.'
+        : '';
       sendMetalixPageStatus(
-        'working',
-        (payload.message || 'Yerleşim raporu yüklendi.') + progress + parts,
-        { partCount: payload.partCount || 0, partIds: payload.partIds || [] }
+        payload.incomplete ? 'warning' : 'working',
+        (payload.message || 'Yerleşim raporu yüklendi.') + progress + parts + warning,
+        {
+          partCount: payload.partCount || 0,
+          partIds: payload.partIds || [],
+          unplacedParts: payload.unplacedParts || 0,
+        }
       );
       showToast(
         (payload.message || 'Nest raporu yüklendi.') +
           progress +
           parts +
+          warning +
           (minutes != null ? ' Kesim ' + minutes + ' dk.' : '') +
           (payload.output ? '\n' + payload.output : ''),
-        'ok',
-        9000
+        payload.incomplete ? 'info' : 'ok',
+        payload.incomplete ? 12000 : 9000
       );
       return;
     }

@@ -273,9 +273,16 @@ async function openOrd(payload) {
     mode: 'script',
     started: true,
     reportPath,
+    incomplete: parsed.incomplete,
+    unplacedParts: parsed.unplacedParts,
+    orderedParts: parsed.orderedParts,
+    placedParts: parsed.placedParts,
+    warning: parsed.warning,
     stdout: parsed.stdout,
     stderr: parsed.stderr,
-    message: 'Metalix betiği Perfex raporunu üretti: ' + path.basename(reportPath),
+    message: parsed.incomplete
+      ? 'Metalix raporu üretildi; ' + parsed.warning
+      : 'Metalix betiği Perfex raporunu üretti: ' + path.basename(reportPath),
   };
 }
 
@@ -381,6 +388,11 @@ async function processOrdBatch(downloaded, payload, onProgress) {
         ordPath: item.path,
         reportPath: opened.reportPath,
         message: opened.message,
+        incomplete: opened.incomplete,
+        unplacedParts: opened.unplacedParts || 0,
+        orderedParts: opened.orderedParts,
+        placedParts: opened.placedParts,
+        warning: opened.warning || '',
         output: opened.stdout,
         report: current.posted.report || null,
         partCount: current.posted.partCount || 0,
@@ -391,11 +403,24 @@ async function processOrdBatch(downloaded, payload, onProgress) {
   }
 
   const failed = results.filter((item) => !item.opened.ok || !item.posted || !item.posted.ok);
+  const incomplete = results.filter((item) => item.opened && item.opened.incomplete);
   return {
     ...source,
     ok: failed.length === 0,
     processed: results.length,
     uploaded: results.length - failed.length,
+    incomplete: incomplete.length > 0,
+    unplacedParts: incomplete.reduce(
+      (total, item) => total + Number(item.opened.unplacedParts || 0),
+      0
+    ),
+    warnings: incomplete.map((item) => ({
+      ordPath: item.ordPath,
+      warning: item.opened.warning,
+      unplacedParts: item.opened.unplacedParts,
+      orderedParts: item.opened.orderedParts,
+      placedParts: item.opened.placedParts,
+    })),
     partCount: results.reduce(
       (total, item) => total + Number((item.posted && item.posted.partCount) || 0),
       0

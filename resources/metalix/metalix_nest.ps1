@@ -7,7 +7,7 @@
   2) ORD'deki her DXF: cncKadPart.Document -> SetCurMachine, ImportFile2, AutoCut3, InterfaceSave (.dft DXF'in yanina).
   3) <ord>_dft.ORD yazar (DXF yollari .dft ile degisir).
   4) AutoNest.Document: SetCurMachine, LoadOrdFile2, SheetSizes*API*, DoStartAutoNest3(1), Save(.dsp), DoOrderReport(Template, OutCsv).
-  5) Basarida son satir:  CSV <OutCsv>   (cikis kodu 0). Hatada "HATA ..." ve sifirdan farkli cikis kodu.
+  5) Basarida son satir:  CSV <OutCsv>   (cikis kodu 0). Yerlesmeyen parca varsa ondan once 'UYARI yerlesmeyen parca: N' satiri yazilir (cikis kodu yine 0). Hatada "HATA ..." ve sifirdan farkli cikis kodu.
 
   Cikis kodlari: 0 tamam | 2 girdi/dosya | 3 cncKad/AutoNest penceresi acik | 4 rapor sablonu yok
                  5 DXF/AutoCut hatasi | 6 yerlesim/.dsp hatasi | 7 CSV gecersiz (kesim suresi 0 / pierce 0 / dosya yok)
@@ -18,7 +18,7 @@
 
 .EXAMPLE
   powershell -NoProfile -ExecutionPolicy Bypass -File metalix_nest.ps1 -OrdFile C:\Metalix\Perfex\MO\MO_DKP_1.5.ORD `
-     -Template C:\Metalix\RPT_AN_ALL_AUT_ENG_Perfex.csv -OutCsv C:\Metalix\Perfex\MO\nest.csv -SheetX 2500 -SheetY 1250 -SheetQty 50
+     -Template C:\Metalix\RPT_AN_ALL_AUT_ENG_Perfex.csv -OutCsv C:\Metalix\Perfex\MO\nest.csv -SheetX 2500 -SheetY 1250 -SheetQty 200
 #>
 param(
     [Parameter(Mandatory = $true)][string]$OrdFile,
@@ -27,7 +27,7 @@ param(
     [int]$Machine = -1,
     [double]$SheetX = 2500,
     [double]$SheetY = 1250,
-    [int]$SheetQty = 50
+    [int]$SheetQty = 200
 )
 
 $ErrorActionPreference = 'Stop'
@@ -206,6 +206,19 @@ try {
     $ctZero = ((($ctv -replace '[0:]', '')) -eq '')
     if ($ctZero -or $pcv -eq 0) { Fail 7 "CSV gecersiz: toplam kesim suresi=$ctv, pierce=$pcv (0 olamaz). $OutCsv" }
     Out-Line "OZET toplam_kesim_suresi=$ctv pierce=$pcv alt_yerlesim=$subs"
+    # ---- 5b) Yerlesmeyen parca kontrolu (cikis kodu 0 kalir; sadece uyari satiri) ----
+    $ordM = [regex]::Match($txt, '(?im)^\s*Total ordered parts:\s*,\s*(\d+)')
+    $plcM = [regex]::Match($txt, '(?im)^\s*Total Placed Parts:\s*,\s*(\d+)')
+    if ($ordM.Success -and $plcM.Success) {
+        $ordN = [int]$ordM.Groups[1].Value; $plcN = [int]$plcM.Groups[1].Value
+        Out-Line "PARCA siparis=$ordN yerlesen=$plcN"
+        if ($plcN -lt $ordN) {
+            Write-Output ("UYARI yerlesmeyen parca: " + ($ordN - $plcN))
+            Out-Line "UYARI detay: siparis=$ordN yerlesen=$plcN sac_ust_siniri=$SheetQty; -SheetQty degerini artirip yerlesimi yeniden calistirin"
+        }
+    } else {
+        Out-Line "UYARI: CSV'de 'Total ordered parts' / 'Total Placed Parts' satirlari bulunamadi; yerlesim tamamligi dogrulanamadi"
+    }
     Write-Output "CSV $OutCsv"
     exit 0
 } catch {

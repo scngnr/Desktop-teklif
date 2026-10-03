@@ -1799,7 +1799,10 @@
         const opened = await api.metalixOpen(values);
         const host = el('metalixOut');
         const note = document.createElement('p');
-        note.className = opened && opened.ok ? 'ops-cost-note' : 'ops-banner ops-banner-warn';
+        note.className =
+          opened && opened.ok && !opened.incomplete
+            ? 'ops-cost-note'
+            : 'ops-banner ops-banner-warn';
         note.textContent = (opened && (opened.message || opened.error)) || 'ORD açılamadı.';
         if (host) host.appendChild(note);
         return;
