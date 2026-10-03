@@ -37,7 +37,6 @@
   let cachedBaseUrl = '';
   let cachedAuthToken = '';
   let metalixDirCache = '';
-  let metalixMachineNoCache = '1';
   let metalixSheetXCache = '';
   let metalixSheetYCache = '';
   let metalixReportTemplateCache = '';
@@ -107,7 +106,6 @@
       cachedBaseUrl = String((cfg && (cfg.apiRoot || cfg.baseUrl)) || '').replace(/\/+$/, '');
       cachedAuthToken = String((cfg && cfg.authToken) || '');
       metalixDirCache = String((cfg && cfg.metalixDir) || '');
-      metalixMachineNoCache = String((cfg && cfg.metalixMachineNo) || '1');
       metalixSheetXCache = String((cfg && cfg.metalixSheetX) || '');
       metalixSheetYCache = String((cfg && cfg.metalixSheetY) || '');
       metalixReportTemplateCache = String((cfg && cfg.metalixReportTemplate) || '');
@@ -1554,7 +1552,6 @@
       profile: (el('metalixProfile') && el('metalixProfile').value.trim()) || 'metalix_perfex',
       sheetX: (el('metalixSx') && el('metalixSx').value.trim()) || '',
       sheetY: (el('metalixSy') && el('metalixSy').value.trim()) || '',
-      machineNo: metalixMachineNoCache,
       reportTemplate: metalixReportTemplateCache,
     };
   }

@@ -161,13 +161,14 @@ function validateOrdFile(ordPath) {
   return { ok: true, ordPath: target };
 }
 
-function runMetalixCom(env) {
+function runMetalixScript(options) {
   return new Promise((resolve) => {
+    const args = ord.nestScriptArgs(options);
     const child = spawn(
       'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-Command', ord.METALIX_PS],
+      args,
       {
-        env: { ...process.env, ...env },
+        env: process.env,
         windowsHide: true,
       }
     );
@@ -194,71 +195,87 @@ function runMetalixCom(env) {
   });
 }
 
-function comOutput(com) {
-  return [com && com.stderr, com && com.error, com && com.stdout]
-    .map((value) => String(value || '').trim())
-    .filter(Boolean)
-    .join('\n');
-}
-
 async function openOrd(payload) {
   const file = validateOrdFile(payload && payload.ordPath);
   if (!file.ok) return file;
   const cfg = config.get();
-  const sizes = ord.sheetSizeEnv({
-    ordPath: file.ordPath,
+  const options = ord.nestScriptOptions({
     sheetX: (payload && payload.sheetX) || cfg.metalixSheetX,
     sheetY: (payload && payload.sheetY) || cfg.metalixSheetY,
-    machineNo: (payload && payload.machineNo) || cfg.metalixMachineNo,
-    reportTemplate: (payload && payload.reportTemplate) || cfg.metalixReportTemplate,
+    reportTemplate:
+      (payload && payload.reportTemplate) || config.getMetalixReportTemplate(),
   });
-  if (!sizes.ok) return sizes;
+  if (!options.ok) return options;
 
   if (process.platform !== 'win32') {
     return {
       ok: false,
-      code: 'com_windows_only',
-      error: ord.explainMetalixCode('com_windows_only'),
+      code: 'script_windows_only',
+      error: ord.explainMetalixCode('script_windows_only'),
     };
   }
 
-  const com = await runMetalixCom(sizes.env);
-  const output = comOutput(com);
-  if (!com.ok) {
+  const scriptPath = config.getMetalixScriptPath();
+  if (!fs.existsSync(scriptPath)) {
     return {
       ok: false,
-      mode: 'com',
-      code: 'com_failed',
-      error: output || 'AutoNest.Document COM çağrısı başarısız.',
-      stdout: com.stdout || '',
-      stderr: com.stderr || '',
+      mode: 'script',
+      code: 'script_missing',
+      error: ord.explainMetalixCode('script_missing') + ' ' + scriptPath,
+    };
+  }
+  if (!fs.existsSync(options.reportTemplate)) {
+    return {
+      ok: false,
+      mode: 'script',
+      code: 'report_template_required',
+      error: ord.explainMetalixCode('report_template_required') + ' ' + options.reportTemplate,
     };
   }
 
-  const nestMatch = /(?:^|\r?\n)NEST\s+(-?\d+)/.exec(com.stdout || '');
-  const reportMatch = /(?:^|\r?\n)REPORT\s+(.+?)(?:\r?\n|$)/.exec(com.stdout || '');
-  const dspMatch = /(?:^|\r?\n)DSP\s+(.+?)(?:\r?\n|$)/.exec(com.stdout || '');
-  const reportPath = reportMatch ? reportMatch[1].trim() : '';
+  const outCsv = path.join(
+    path.dirname(file.ordPath),
+    path.basename(file.ordPath, path.extname(file.ordPath)) + '_Perfex.csv'
+  );
+  const executed = await runMetalixScript({
+    scriptPath,
+    ordPath: file.ordPath,
+    template: options.reportTemplate,
+    outCsv,
+    sheetX: options.sheetX,
+    sheetY: options.sheetY,
+    sheetQty: options.sheetQty,
+  });
+  const parsed = ord.parseNestScriptResult(
+    executed.code,
+    executed.stdout,
+    [executed.error, executed.stderr].filter(Boolean).join('\n')
+  );
+  if (!parsed.ok) {
+    return {
+      ...parsed,
+      mode: 'script',
+    };
+  }
+  const reportPath = parsed.csvPath;
   if (!reportPath || !fs.existsSync(reportPath)) {
     return {
       ok: false,
-      mode: 'com',
+      mode: 'script',
       code: 'report_missing',
-      error: [ord.explainMetalixCode('report_missing'), output].filter(Boolean).join('\n'),
-      stdout: com.stdout || '',
-      stderr: com.stderr || '',
+      error: ord.explainMetalixCode('report_missing') + ' ' + (reportPath || outCsv),
+      stdout: parsed.stdout,
+      stderr: parsed.stderr,
     };
   }
   return {
     ok: true,
-    mode: 'com',
+    mode: 'script',
     started: true,
-    nestCode: nestMatch ? Number(nestMatch[1]) : null,
-    dspPath: dspMatch ? dspMatch[1].trim() : '',
     reportPath,
-    stdout: com.stdout || '',
-    stderr: com.stderr || '',
-    message: 'AutoNest yerleşimi ve Perfex raporu tamamlandı: ' + path.basename(reportPath),
+    stdout: parsed.stdout,
+    stderr: parsed.stderr,
+    message: 'Metalix betiği Perfex raporunu üretti: ' + path.basename(reportPath),
   };
 }
 
@@ -325,7 +342,6 @@ async function processOrdBatch(downloaded, payload, onProgress) {
       ordPath: item.path,
       sheetX: payload && payload.sheetX,
       sheetY: payload && payload.sheetY,
-      machineNo: payload && payload.machineNo,
       reportTemplate: payload && payload.reportTemplate,
       startNest: true,
     });

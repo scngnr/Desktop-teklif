@@ -569,7 +569,6 @@ function metalixAuth() {
 function rememberMetalixPrefs(partial) {
   const next = {};
   if (partial.metalixDir !== undefined) next.metalixDir = partial.metalixDir;
-  if (partial.metalixMachineNo !== undefined) next.metalixMachineNo = partial.metalixMachineNo;
   if (partial.metalixSheetX !== undefined) next.metalixSheetX = partial.metalixSheetX;
   if (partial.metalixSheetY !== undefined) next.metalixSheetY = partial.metalixSheetY;
   if (partial.metalixReportTemplate !== undefined) {
@@ -662,7 +661,6 @@ ipcMain.handle('metalix:process', async (_event, payload = {}) => {
     if (!downloaded.ok) return downloaded;
     rememberMetalixPrefs({
       metalixDir: downloaded.dir,
-      metalixMachineNo: String(payload.machineNo || ''),
       metalixSheetX: String(payload.sheetX || ''),
       metalixSheetY: String(payload.sheetY || ''),
       metalixReportTemplate: String(payload.reportTemplate || ''),
@@ -679,7 +677,6 @@ ipcMain.handle('metalix:open', async (_event, payload = {}) => {
   try {
     const result = await metalix.openOrd(payload);
     const prefs = {};
-    if (payload.machineNo !== undefined) prefs.metalixMachineNo = String(payload.machineNo);
     if (payload.sheetX !== undefined) prefs.metalixSheetX = String(payload.sheetX);
     if (payload.sheetY !== undefined) prefs.metalixSheetY = String(payload.sheetY);
     if (payload.reportTemplate !== undefined) {

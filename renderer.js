@@ -13,7 +13,6 @@ const inputFirmaAdi = document.getElementById('inputFirmaAdi');
 const girisUrlPreview = document.getElementById('girisUrlPreview');
 const inputJwt = document.getElementById('inputJwt');
 const inputMetalixDir = document.getElementById('inputMetalixDir');
-const inputMetalixMachineNo = document.getElementById('inputMetalixMachineNo');
 const inputMetalixSheetX = document.getElementById('inputMetalixSheetX');
 const inputMetalixSheetY = document.getElementById('inputMetalixSheetY');
 const inputMetalixReportTemplate = document.getElementById('inputMetalixReportTemplate');
@@ -400,7 +399,6 @@ async function loadSettingsForm() {
   inputFirmaAdi.value = cfg.firmaAdi || '';
   inputJwt.value = cfg.authToken || '';
   inputMetalixDir.value = cfg.metalixDir || '';
-  inputMetalixMachineNo.value = cfg.metalixMachineNo || '1';
   inputMetalixSheetX.value = cfg.metalixSheetX || '2500';
   inputMetalixSheetY.value = cfg.metalixSheetY || '1250';
   inputMetalixReportTemplate.value =
@@ -950,19 +948,16 @@ async function runWebviewMetalix(extra) {
 
   payload.sheetX = String(payload.sheetX || cfg.metalixSheetX || '').trim();
   payload.sheetY = String(payload.sheetY || cfg.metalixSheetY || '').trim();
-  payload.machineNo = String(payload.machineNo || cfg.metalixMachineNo || '').trim();
   payload.reportTemplate = String(
     payload.reportTemplate || cfg.metalixReportTemplate || ''
   ).trim();
   if (
     !(Number(payload.sheetX) > 0) ||
     !(Number(payload.sheetY) > 0) ||
-    !Number.isInteger(Number(payload.machineNo)) ||
-    Number(payload.machineNo) < 0 ||
     !payload.reportTemplate
   ) {
     showToast(
-      'AutoNest makine numarası, sac X/Y ve Perfex rapor şablonunu Ayarlar’dan girin.',
+      'Sac X/Y ve paket içindeki Perfex rapor şablonu yolunu Ayarlar’dan kontrol edin.',
       'err',
       7000
     );
@@ -1109,7 +1104,6 @@ settingsForm.addEventListener('submit', async (e) => {
     firmaAdi: inputFirmaAdi.value.trim(),
     authToken: inputJwt.value.trim(),
     metalixDir: inputMetalixDir.value.trim(),
-    metalixMachineNo: inputMetalixMachineNo.value.trim(),
     metalixSheetX: inputMetalixSheetX.value.trim(),
     metalixSheetY: inputMetalixSheetY.value.trim(),
     metalixReportTemplate: inputMetalixReportTemplate.value.trim(),

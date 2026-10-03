@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -325,65 +326,91 @@ test('panel düğmesi ve API token yalnızca kendi hostuna yazılır', () => {
   assert.equal(headers.Accept, 'application/json');
 });
 
-test('AutoNest.Document ortamı makine, sac ve rapor şablonuyla kurulur', () => {
+test('hazır Metalix betiği belirtilen parametrelerle çalıştırılır', () => {
   assert.equal(
-    ord.sheetSizeEnv({
-      ordPath: 'C:\\a.ord',
+    ord.nestScriptOptions({
       sheetX: '',
       sheetY: 1250,
-      machineNo: 1,
       reportTemplate: 'C:\\Metalix\\rapor.csv',
     }).code,
     'sheet_size_required'
   );
-  assert.equal(
-    ord.sheetSizeEnv({
-      ordPath: 'C:\\a.ord',
-      sheetX: 2500,
-      sheetY: 1250,
-      machineNo: '',
-      reportTemplate: 'C:\\Metalix\\rapor.csv',
-    }).code,
-    'machine_required'
-  );
-  const env = ord.sheetSizeEnv({
-    ordPath: 'D:\\Metalix\\Gelen\\MO-395_DKP_1.2.ORD',
+  const options = ord.nestScriptOptions({
     sheetX: 2500,
     sheetY: 1250,
-    machineNo: 2,
     reportTemplate: 'C:\\Metalix\\RPT_AN_ALL_AUT_ENG_Perfex.csv',
   });
-  assert.equal(env.env.METALIX_SX, '2500');
-  assert.equal(env.env.METALIX_SY, '1250');
-  assert.equal(env.env.METALIX_MACHINE, '2');
+  assert.equal(options.sheetX, 2500);
+  assert.equal(options.sheetY, 1250);
+  assert.equal(options.sheetQty, 50);
   assert.equal(
-    env.env.METALIX_REPORT_TEMPLATE,
+    options.reportTemplate,
     'C:\\Metalix\\RPT_AN_ALL_AUT_ENG_Perfex.csv'
   );
-  assert.equal(ord.METALIX_PS.includes('AutoNest.Document'), true);
-  assert.equal(ord.METALIX_PS.includes('SetCurMachine'), true);
-  assert.equal(ord.METALIX_PS.includes('LoadOrdFile2'), true);
-  assert.equal(ord.METALIX_PS.includes('SheetSizesUseAPISizes(1)'), true);
-  assert.equal(ord.METALIX_PS.includes('SheetSizesClearAPISizes()'), true);
-  assert.equal(ord.METALIX_PS.includes('SheetSizesAddAPISizes($sx, $sy, 50)'), true);
-  assert.equal(ord.METALIX_PS.includes('DoStartAutoNest3(1)'), true);
-  assert.equal(ord.METALIX_PS.includes('Save($dsp, $true)'), true);
-  assert.equal(ord.METALIX_PS.includes('DoOrderReport($template, $report)'), true);
-  assert.equal(ord.METALIX_PS.includes('Perfex rapor şablonu bulunamadı'), true);
-  assert.equal(ord.METALIX_PS.includes('AutoNest DSP dosyasını kaydetmedi'), true);
-  assert.equal(
-    ord.METALIX_PS.indexOf('Test-Path -LiteralPath $dsp -PathType Leaf') <
-      ord.METALIX_PS.indexOf('DoOrderReport($template, $report)'),
-    true
+  assert.deepEqual(
+    ord.nestScriptArgs({
+      scriptPath: 'C:\\app\\metalix_nest.ps1',
+      ordPath: 'C:\\Metalix\\MO.ORD',
+      template: 'C:\\app\\RPT_AN_ALL_AUT_ENG_Perfex.csv',
+      outCsv: 'C:\\Metalix\\MO_Perfex.csv',
+      sheetX: 2500,
+      sheetY: 1250,
+      sheetQty: 50,
+    }),
+    [
+      '-NoProfile',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-File',
+      'C:\\app\\metalix_nest.ps1',
+      '-OrdFile',
+      'C:\\Metalix\\MO.ORD',
+      '-Template',
+      'C:\\app\\RPT_AN_ALL_AUT_ENG_Perfex.csv',
+      '-OutCsv',
+      'C:\\Metalix\\MO_Perfex.csv',
+      '-SheetX',
+      '2500',
+      '-SheetY',
+      '1250',
+      '-SheetQty',
+      '50',
+    ]
   );
-  assert.equal(ord.METALIX_PS.includes('GenerateNC'), false);
-  assert.equal(ord.METALIX_PS.includes('OptiMech.Document'), false);
-  assert.equal(ord.METALIX_PS.includes('ShowWin'), false);
-  assert.equal(ord.METALIX_PS.includes('D:\\Metalix'), false);
+  assert.equal(
+    ord.parseNestScriptResult(0, '09:00 tamam\r\nCSV C:\\Metalix\\MO_Perfex.csv\r\n', '').csvPath,
+    'C:\\Metalix\\MO_Perfex.csv'
+  );
+  assert.equal(
+    ord.parseNestScriptResult(5, '09:00 deneme\r\nHATA P12.dxf AutoCut basarisiz\r\n', '').error,
+    'HATA P12.dxf AutoCut basarisiz'
+  );
+  assert.equal(ord.parseNestScriptResult(0, 'rapor var ama protokol yok', '').code, 'script_protocol');
   assert.equal(config.DEFAULTS.metalixSheetX, '2500');
   assert.equal(config.DEFAULTS.metalixSheetY, '1250');
-  assert.equal(config.DEFAULTS.metalixMachineNo, '1');
   assert.equal(config.DEFAULTS.metalixReportTemplate, 'RPT_AN_ALL_AUT_ENG_Perfex.csv');
+});
+
+test('Metalix kaynakları yüklenen dosyalarla byte-byte aynıdır', () => {
+  const script = fs.readFileSync(path.join(__dirname, '..', 'resources', 'metalix', 'metalix_nest.ps1'));
+  const template = fs.readFileSync(
+    path.join(__dirname, '..', 'resources', 'metalix', 'RPT_AN_ALL_AUT_ENG_Perfex.csv')
+  );
+  assert.equal(
+    crypto.createHash('sha256').update(script).digest('hex'),
+    'fb5b06778ae2f8947aa1502044caf8d50f48fc9908323ff501f3322d437039c0'
+  );
+  assert.equal(
+    crypto.createHash('sha256').update(template).digest('hex'),
+    '209db8cd9d39caaae7237c1eea3d706dea448ae7f27b483024d0a8135763a420'
+  );
+  assert.equal(script.subarray(0, 3).equals(Buffer.from([0xef, 0xbb, 0xbf])), true);
+  assert.equal(script.toString('binary').replace(/\r\n/g, '').includes('\n'), false);
+  assert.equal(path.basename(config.getMetalixScriptPath()), 'metalix_nest.ps1');
+  assert.equal(
+    path.basename(config.getMetalixReportTemplate()),
+    'RPT_AN_ALL_AUT_ENG_Perfex.csv'
+  );
 });
 
 test('watchForNestCsv yalnızca Perfex raporunu ve içerik imzasını kabul eder', async () => {

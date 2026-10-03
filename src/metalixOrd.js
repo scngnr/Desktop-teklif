@@ -29,7 +29,9 @@ const MESSAGES = {
   sheet_size_required: 'AutoNest LoadOrdFile için sac ölçüsü (X ve Y, mm) gerekli.',
   machine_required: 'AutoNest makine numarası Ayarlar’da tanımlanmalı.',
   report_template_required: 'Perfex rapor şablonu Ayarlar’da tanımlanmalı.',
-  com_windows_only: 'AutoNest COM yalnızca Windows üzerinde çalışır.',
+  script_windows_only: 'Metalix yerleşim betiği yalnızca Windows üzerinde çalışır.',
+  script_missing: 'Paket içindeki Metalix yerleşim betiği bulunamadı.',
+  script_protocol: 'Metalix betiği beklenen CSV/HATA çıktısını vermedi.',
   report_missing: 'AutoNest Perfex CSV raporunu üretmedi.',
   ord_missing: 'ORD dosyası bulunamadı.',
   ord_invalid: 'Yalnızca .ord dosyası açılır.',
@@ -591,91 +593,72 @@ function interpretNestList(status, body) {
   };
 }
 
-function sheetSizeEnv(input) {
+function nestScriptOptions(input) {
   const sx = Number(input && input.sheetX);
   const sy = Number(input && input.sheetY);
   if (!Number.isFinite(sx) || !Number.isFinite(sy) || sx <= 0 || sy <= 0) {
     return fail('sheet_size_required');
   }
-  const machineRaw = String((input && input.machineNo) == null ? '' : input.machineNo).trim();
-  const machineNo = Number(machineRaw);
-  if (!machineRaw || !Number.isInteger(machineNo) || machineNo < 0) {
-    return fail('machine_required');
-  }
   const reportTemplate = String((input && input.reportTemplate) || '').trim();
   if (!reportTemplate) return fail('report_template_required');
   return {
     ok: true,
-    env: {
-      METALIX_ORD: String(input.ordPath || ''),
-      METALIX_SX: String(sx),
-      METALIX_SY: String(sy),
-      METALIX_MACHINE: String(machineNo),
-      METALIX_REPORT_TEMPLATE: reportTemplate,
-    },
+    sheetX: sx,
+    sheetY: sy,
+    sheetQty: 50,
+    reportTemplate,
   };
 }
 
-const METALIX_PS = [
-  "$ErrorActionPreference = 'Stop'",
-  '$OutputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)',
-  '$ord = $env:METALIX_ORD',
-  '$sx = [double]$env:METALIX_SX',
-  '$sy = [double]$env:METALIX_SY',
-  '$machine = [int]$env:METALIX_MACHINE',
-  '$template = $env:METALIX_REPORT_TEMPLATE',
-  "$templateName = [IO.Path]::GetFileName($template)",
-  "$dsp = [IO.Path]::ChangeExtension($ord, '.dsp')",
-  "$report = Join-Path ([IO.Path]::GetDirectoryName($ord)) (([IO.Path]::GetFileNameWithoutExtension($ord)) + '_Perfex.csv')",
-  '$d = $null',
-  'try {',
-  '  if (-not (Test-Path -LiteralPath $ord -PathType Leaf)) { throw "ORD bulunamadı: $ord" }',
-  '  if (-not (Test-Path -LiteralPath $template -PathType Leaf)) {',
-  '    $roots = @(',
-  "      'C:\\Metalix',",
-  "      (Join-Path $env:ProgramData 'Metalix'),",
-  "      (Join-Path $env:ProgramFiles 'Metalix'),",
-  "      (Join-Path ${env:ProgramFiles(x86)} 'Metalix')",
-  '    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Container) } | Select-Object -Unique',
-  '    $found = $roots | ForEach-Object {',
-  '      Get-ChildItem -LiteralPath $_ -Filter $templateName -File -Recurse -ErrorAction SilentlyContinue',
-  '    } | Select-Object -First 1',
-  '    if ($null -eq $found) { throw "Perfex rapor şablonu bulunamadı: $template. Ayarlar bölümünde tam yolu girin." }',
-  '    $template = $found.FullName',
-  '  }',
-  '  if (Test-Path -LiteralPath $dsp) { Remove-Item -LiteralPath $dsp -Force }',
-  '  if (Test-Path -LiteralPath $report) { Remove-Item -LiteralPath $report -Force }',
-  "  Write-Output ('ORD ' + $ord)",
-  "  Write-Output ('TEMPLATE ' + $template)",
-  "  Write-Output ('DSP_TARGET ' + $dsp)",
-  '  $d = New-Object -ComObject AutoNest.Document',
-  '  $machineResult = $d.SetCurMachine($machine)',
-  '  $loadResult = $d.LoadOrdFile2($ord, $sx, $sy, 1, $dsp)',
-  '  $useSizesResult = $d.SheetSizesUseAPISizes(1)',
-  '  $clearSizesResult = $d.SheetSizesClearAPISizes()',
-  '  $addSizesResult = $d.SheetSizesAddAPISizes($sx, $sy, 50)',
-  '  $nest = $d.DoStartAutoNest3(1)',
-  '  $saveResult = $d.Save($dsp, $true)',
-  "  if (-not (Test-Path -LiteralPath $dsp -PathType Leaf)) { throw ('AutoNest DSP dosyasını kaydetmedi. Load=' + $loadResult + '; Nest=' + $nest + '; Save=' + $saveResult + '; Hedef=' + $dsp) }",
-  '  $dspFile = Get-Item -LiteralPath $dsp',
-  "  if ($dspFile.Length -lt 1) { throw ('AutoNest boş DSP dosyası kaydetti: ' + $dsp) }",
-  '  $reportResult = $d.DoOrderReport($template, $report)',
-  "  if (-not (Test-Path -LiteralPath $report -PathType Leaf)) { throw 'Perfex CSV raporu üretilmedi: ' + $report }",
-  "  Write-Output ('MACHINE_RESULT ' + $machineResult)",
-  "  Write-Output ('LOAD_RESULT ' + $loadResult)",
-  "  Write-Output ('SHEET_RESULTS ' + $useSizesResult + ',' + $clearSizesResult + ',' + $addSizesResult)",
-  "  Write-Output ('NEST ' + $nest)",
-  "  Write-Output ('SAVE_RESULT ' + $saveResult)",
-  "  Write-Output ('REPORT_RESULT ' + $reportResult)",
-  "  Write-Output ('DSP ' + $dsp)",
-  "  Write-Output ('REPORT ' + $report)",
-  '} catch {',
-  '  [Console]::Error.WriteLine($_.Exception.ToString())',
-  '  exit 1',
-  '} finally {',
-  '  if ($null -ne $d) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($d) }',
-  '}',
-].join('\n');
+function nestScriptArgs(input) {
+  return [
+    '-NoProfile',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-File',
+    String(input.scriptPath),
+    '-OrdFile',
+    String(input.ordPath),
+    '-Template',
+    String(input.template),
+    '-OutCsv',
+    String(input.outCsv),
+    '-SheetX',
+    String(input.sheetX),
+    '-SheetY',
+    String(input.sheetY),
+    '-SheetQty',
+    String(input.sheetQty),
+  ];
+}
+
+function parseNestScriptResult(exitCode, stdout, stderr) {
+  const out = String(stdout || '').replace(/^\uFEFF/, '');
+  const err = String(stderr || '').trim();
+  const lines = out
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const last = lines[lines.length - 1] || '';
+  if (Number(exitCode) === 0 && /^CSV\s+.+/i.test(last)) {
+    return {
+      ok: true,
+      exitCode: 0,
+      csvPath: last.replace(/^CSV\s+/i, '').trim(),
+      stdout: out,
+      stderr: err,
+    };
+  }
+  const hata = [...lines].reverse().find((line) => /^HATA(?:\s|$)/i.test(line));
+  return {
+    ok: false,
+    exitCode: Number.isFinite(Number(exitCode)) ? Number(exitCode) : -1,
+    code: Number(exitCode) === 0 ? 'script_protocol' : 'script_failed',
+    error: hata || err || explainMetalixCode('script_protocol'),
+    stdout: out,
+    stderr: err,
+  };
+}
 
 function findEocd(buf) {
   const min = Math.max(0, buf.length - 22 - 65535);
@@ -815,7 +798,6 @@ module.exports = {
   DIR_MAX,
   CSV_MAX_BYTES,
   NEST_PROFILE,
-  METALIX_PS,
   MESSAGES,
   explainMetalixCode,
   validateMoId,
@@ -844,7 +826,9 @@ module.exports = {
   interpretOrdDownload,
   interpretNestPost,
   interpretNestList,
-  sheetSizeEnv,
+  nestScriptOptions,
+  nestScriptArgs,
+  parseNestScriptResult,
   extractZip,
   localDest,
   readZipEntries,
