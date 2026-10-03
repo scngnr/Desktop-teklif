@@ -294,6 +294,10 @@ async function submitNest(payload) {
     body: JSON.stringify(body.body),
   });
   const interpreted = ord.interpretNestPost(result.status, result.body);
+  const inspected = ord.inspectPerfexNestCsv(body.body.csv);
+  interpreted.parts = inspected.parts;
+  interpreted.partCount = inspected.partCount;
+  interpreted.partIds = inspected.partIds;
   interpreted.url = result.url;
   return interpreted;
 }
@@ -379,6 +383,8 @@ async function processOrdBatch(downloaded, payload, onProgress) {
         message: opened.message,
         output: opened.stdout,
         report: current.posted.report || null,
+        partCount: current.posted.partCount || 0,
+        partIds: current.posted.partIds || [],
         error: current.posted.error,
       });
     }
@@ -390,6 +396,17 @@ async function processOrdBatch(downloaded, payload, onProgress) {
     ok: failed.length === 0,
     processed: results.length,
     uploaded: results.length - failed.length,
+    partCount: results.reduce(
+      (total, item) => total + Number((item.posted && item.posted.partCount) || 0),
+      0
+    ),
+    partIds: [
+      ...new Set(
+        results.flatMap((item) =>
+          item.posted && Array.isArray(item.posted.partIds) ? item.posted.partIds : []
+        )
+      ),
+    ],
     results,
     error: failed.length
       ? failed

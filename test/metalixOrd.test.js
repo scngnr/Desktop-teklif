@@ -139,6 +139,26 @@ test('nest CSV kuralları', () => {
   assert.equal(ord.decodeTextBuffer(Buffer.from([0xdd, 0xfe])), 'İş');
 });
 
+test('Perfex raporundaki iki parça ayrı ayrı bulunur', () => {
+  const csv = [
+    'Parts in Order:',
+    '--------------------------------------------------',
+    ',Num,Name,Size X,Size Y,Area,Perimeter,Material,Thickness,Ordered Qty,Placed Qty,Weight,Gross,Cut length,Cut time,Pierces,Machine time',
+    ',1,,C:\\Metalix\\Perfex\\DEMO\\DKP_1\\P357-EP_M_65_KAPI_PRF_KLT_G.dft,580,39.1,0.022,1561.9,Steel,1,1,1,0.171,12.091,1601.5,0:00:20,23,0:00:45',
+    ',2,,C:\\Metalix\\Perfex\\DEMO\\DKP_1\\P358-EP_M_65_KAPI_PRF_MNT_G.dft,580,39.1,0.022,1596.8,Steel,1,1,1,0.174,12.284,1641,0:00:20,26,0:00:40',
+    '',
+    'Parts in Sub Nests:',
+  ].join('\r\n');
+  const inspected = ord.inspectPerfexNestCsv(csv);
+  assert.equal(inspected.partCount, 2);
+  assert.deepEqual(inspected.partIds, ['357', '358']);
+  assert.equal(inspected.parts[1].orderedQty, '1');
+  assert.equal(inspected.parts[1].placedQty, '1');
+
+  const prepared = ord.prepareNestCsv('RPT_AN_ALL_AUT_ENG_Perfex.csv', csv);
+  assert.equal(prepared.partCount, 2);
+});
+
 test('grup ve zip yanıtları ayrılır', () => {
   const groups = ord.interpretGroups(
     200,

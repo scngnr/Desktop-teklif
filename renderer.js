@@ -924,15 +924,31 @@ function parseMetalixExtra(extra) {
   }
 }
 
+function sendMetalixPageStatus(state, message, extra) {
+  if (!pageWebview || typeof pageWebview.send !== 'function') return;
+  try {
+    pageWebview.send('metalix-status', {
+      state,
+      message,
+      ...(extra || {}),
+    });
+  } catch {
+    // webview sayfa değiştirirken durum yalnızca Electron bildiriminde kalır
+  }
+}
+
 async function runWebviewMetalix(extra) {
   const payload = parseMetalixExtra(extra);
+  sendMetalixPageStatus('working', 'Electron isteği aldı; ayarlar kontrol ediliyor…');
   const cfg = await refreshConfigCache();
   if (!cachedHasAuth) {
+    sendMetalixPageStatus('error', 'Gönderilemedi: API token eksik.');
     showToast('ORD için Ayarlar’dan API token girin.', 'err', 5500);
     setSettingsOpen(true);
     return;
   }
   if (!payload.moId) {
+    sendMetalixPageStatus('error', 'Gönderilemedi: üretim emri numarası okunamadı.');
     showToast('Üretim emri numarası sayfa adresinden okunamadı.', 'err', 5500);
     return;
   }
@@ -956,6 +972,7 @@ async function runWebviewMetalix(extra) {
     !(Number(payload.sheetY) > 0) ||
     !payload.reportTemplate
   ) {
+    sendMetalixPageStatus('error', 'Gönderilemedi: sac ölçüsü veya rapor şablonu eksik.');
     showToast(
       'Sac X/Y ve paket içindeki Perfex rapor şablonu yolunu Ayarlar’dan kontrol edin.',
       'err',
@@ -965,13 +982,40 @@ async function runWebviewMetalix(extra) {
     return;
   }
 
+  sendMetalixPageStatus('working', 'ORD indiriliyor; Metalix yerleşimi devam ediyor…');
   showToast('ORD indiriliyor ve AutoNest yerleşimi başlatılıyor…', 'info', 3500);
   const result = await window.teklifApp.metalixProcess(payload);
   if (!result || !result.ok) {
+    sendMetalixPageStatus(
+      'error',
+      'Metalix işlemi tamamlanamadı: ' +
+        ((result && result.error) || 'Bilinmeyen hata.')
+    );
     showToast((result && result.error) || 'Metalix işlemi tamamlanamadı.', 'err', 10000);
     return;
   }
   const missing = result.missing > 0 ? ' Eksik DXF: ' + result.missing + '.' : '';
+  const partText =
+    result.partCount > 0
+      ? ' CSV’deki ' +
+        result.partCount +
+        ' parça API’ye gönderildi' +
+        (result.partIds && result.partIds.length
+          ? ' (P' + result.partIds.join(', P') + ')'
+          : '') +
+        '.'
+      : '';
+  sendMetalixPageStatus(
+    'done',
+    'Tamamlandı: ' +
+      result.processed +
+      ' ORD yerleştirildi, ' +
+      result.uploaded +
+      ' rapor yüklendi.' +
+      partText +
+      missing,
+    { partCount: result.partCount || 0, partIds: result.partIds || [] }
+  );
   showToast(
     result.processed +
       ' ORD yerleştirildi, ' +
@@ -1165,9 +1209,25 @@ if (window.teklifApp.onMetalixResult) {
       const minutes = payload.report && payload.report.cut_minutes;
       const progress =
         payload.total > 0 ? ' (' + (Number(payload.index) + 1) + '/' + payload.total + ')' : '';
+      const parts =
+        payload.partCount > 0
+          ? ' ' +
+            payload.partCount +
+            ' parça API’ye gönderildi' +
+            (payload.partIds && payload.partIds.length
+              ? ' (P' + payload.partIds.join(', P') + ')'
+              : '') +
+            '.'
+          : '';
+      sendMetalixPageStatus(
+        'working',
+        (payload.message || 'Yerleşim raporu yüklendi.') + progress + parts,
+        { partCount: payload.partCount || 0, partIds: payload.partIds || [] }
+      );
       showToast(
         (payload.message || 'Nest raporu yüklendi.') +
           progress +
+          parts +
           (minutes != null ? ' Kesim ' + minutes + ' dk.' : '') +
           (payload.output ? '\n' + payload.output : ''),
         'ok',
@@ -1175,6 +1235,10 @@ if (window.teklifApp.onMetalixResult) {
       );
       return;
     }
+    sendMetalixPageStatus(
+      'error',
+      'Nest CSV yüklenemedi: ' + (payload.error || 'Bilinmeyen hata.')
+    );
     showToast(
       [payload.error || 'Nest CSV yüklenemedi.', payload.output].filter(Boolean).join('\n'),
       'err',

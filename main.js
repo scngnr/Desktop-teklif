@@ -625,6 +625,8 @@ function armNestWatch(dir, moId, profile) {
           error: posted.error,
           report: posted.report || null,
           filename: file.filename,
+          partCount: posted.partCount || 0,
+          partIds: posted.partIds || [],
         });
       } catch (err) {
         sendMetalixResult({ ok: false, error: err.message || String(err) });

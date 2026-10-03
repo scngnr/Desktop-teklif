@@ -185,6 +185,75 @@ function isPerfexNestCsv(filename, text) {
     /Parts\s+in\s+Sub\s+Nests/i.test(String(text || ''));
 }
 
+function parseCsvLine(line) {
+  const cells = [];
+  let value = '';
+  let quoted = false;
+  const raw = String(line || '');
+  for (let i = 0; i < raw.length; i += 1) {
+    const char = raw[i];
+    if (char === '"') {
+      if (quoted && raw[i + 1] === '"') {
+        value += '"';
+        i += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (char === ',' && !quoted) {
+      cells.push(value.trim());
+      value = '';
+    } else {
+      value += char;
+    }
+  }
+  cells.push(value.trim());
+  return cells;
+}
+
+function inspectPerfexNestCsv(text) {
+  const lines = String(text || '').split(/\r?\n/);
+  let header = null;
+  let inParts = false;
+  const parts = [];
+  for (const line of lines) {
+    if (/^\s*Parts\s+in\s+Order\s*:/i.test(line)) {
+      inParts = true;
+      header = null;
+      continue;
+    }
+    if (inParts && /^\s*Parts\s+in\s+Sub\s+Nests\s*:/i.test(line)) break;
+    if (!inParts || !line.trim() || /^[-\s,]+$/.test(line)) continue;
+    const cells = parseCsvLine(line);
+    if (!header) {
+      const normalized = cells.map((cell) => cell.toLowerCase().replace(/\s+/g, ' '));
+      if (normalized.includes('num') && normalized.includes('name')) header = normalized;
+      continue;
+    }
+    const fileIndex = cells.findIndex((cell) => /\.(?:dft|dxf)\b/i.test(cell));
+    if (fileIndex < 0) continue;
+    const filePath = cells[fileIndex];
+    const idMatch = path.win32.basename(filePath.replace(/\//g, '\\')).match(/^P(\d+)(?:[-_.]|$)/i);
+    const indexOf = (name) => header.indexOf(name);
+    const cellAt = (name) => {
+      const index = indexOf(name);
+      return index >= 0 ? cells[index] || '' : '';
+    };
+    parts.push({
+      id: idMatch ? idMatch[1] : '',
+      number: cellAt('num'),
+      name: cellAt('name'),
+      filePath,
+      orderedQty: cellAt('ordered qty'),
+      placedQty: cellAt('placed qty'),
+    });
+  }
+  return {
+    partCount: parts.length,
+    partIds: [...new Set(parts.map((part) => part.id).filter(Boolean))],
+    parts,
+  };
+}
+
 function inspectOrdText(text, dir) {
   const parsed = String(text || '')
     .split(/\r?\n/)
@@ -222,7 +291,8 @@ function prepareNestCsv(filename, csv) {
   if (!text.trim()) return fail('csv_empty');
   const bytes = Buffer.byteLength(text, 'utf8');
   if (bytes > CSV_MAX_BYTES) return fail('csv_too_large');
-  return { ok: true, filename: named.filename, csv: text, bytes };
+  const inspected = inspectPerfexNestCsv(text);
+  return { ok: true, filename: named.filename, csv: text, bytes, ...inspected };
 }
 
 function nestProfile(profile) {
@@ -812,6 +882,8 @@ module.exports = {
   decodeTextBuffer,
   decodeOrdText,
   isPerfexNestCsv,
+  parseCsvLine,
+  inspectPerfexNestCsv,
   inspectOrdText,
   nestFilename,
   prepareNestCsv,
